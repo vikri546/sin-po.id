@@ -1,0 +1,6 @@
+{
+  "name": "SinPo.id",
+  "description": "Portal berita SinPo.id yang menyajikan berita politik, peristiwa terkini, hukum, ekbis, dan investigasi mendalam.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
