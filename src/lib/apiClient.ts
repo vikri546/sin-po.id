@@ -1,10 +1,23 @@
 import { ApiResponse } from '@/types/api';
 import { Article } from '@/types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
-const STORAGE_BASE_URL = process.env.NEXT_PUBLIC_STORAGE_URL || 'http://localhost:8000/storage';
+const getApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  if (typeof window !== 'undefined') return `${window.location.origin}/api`;
+  return 'http://127.0.0.1:8000/api';
+};
+
+const getStorageBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_STORAGE_URL) return process.env.NEXT_PUBLIC_STORAGE_URL;
+  if (typeof window !== 'undefined') return `${window.location.origin}/storage`;
+  return 'http://127.0.0.1:8000/storage';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+const STORAGE_BASE_URL = getStorageBaseUrl();
 
 export { API_BASE_URL, STORAGE_BASE_URL };
+
 
 export interface FetchOptions extends RequestInit {
   token?: string;
