@@ -63,36 +63,55 @@ export function getStorageUrl(path?: string): string {
   return `${STORAGE_BASE_URL}${cleanPath}`;
 }
 
+import { stripHtml } from './htmlRenderer';
+import { formatRelativeDate } from './dateFormatter';
+
 /**
  * Transform Laravel API post item to Next.js Article interface
  */
 export function transformLaravelPostToArticle(item: any): Article {
-  const title = item.judul || item.title || 'Tanpa Judul';
+  const title = stripHtml(item.judul || item.title || 'Tanpa Judul');
   const categoryName = (item.kategori?.nama || item.category?.name || 'NASIONAL').toUpperCase();
   const rawImage = item.gambar || item.image || '';
   const imageUrl = getStorageUrl(rawImage);
-  const authorName = item.penulis?.nama || item.author?.name || 'Redaksi Sinpo';
-  const summaryText = item.ringkasan || item.excerpt || item.subtitle || '';
-  
+  const authorName = stripHtml(item.penulis?.nama || item.author?.name || 'Redaksi Sinpo');
+  const rawSummary = item.ringkasan || item.excerpt || item.subtitle || '';
+  const rawContent = item.isi || item.content || '';
+
+  const cleanSummary = stripHtml(rawSummary) || stripHtml(rawContent).slice(0, 180);
+
   const rawTags = item.tag || item.tags || '';
   const tagsList = typeof rawTags === 'string' 
     ? rawTags.split(',').map((t: string) => t.trim().toUpperCase()).filter(Boolean)
     : (Array.isArray(rawTags) ? rawTags.map((t: any) => (t.name || t).toUpperCase()) : []);
 
+  const viewsCount = typeof item.dilihat === 'number' 
+    ? item.dilihat 
+    : (typeof item.views === 'number' 
+        ? item.views 
+        : (parseInt(item.dilihat || item.views || '0', 10) || 0));
+
+  const rawDate = item.tanggal_tayang || item.published_at || item.created_at || '';
+  const captionText = stripHtml(item.caption || item.image_caption || item.caption_gambar || '');
+
   return {
     id: `laravel-${item.id}`,
     title,
-    subtitle: summaryText,
-    summary: summaryText,
-    content: item.isi || item.content || summaryText,
+    subtitle: cleanSummary,
+    summary: cleanSummary,
+    content: rawContent,
     category: categoryName,
     imageUrl: imageUrl.includes('/storage/') && !rawImage ? 'https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=800&q=80' : imageUrl,
-    date: item.tanggal_tayang || item.published_at || 'Terbaru',
+    date: formatRelativeDate(rawDate),
     author: authorName,
     readTime: '3 Menit Baca',
     tags: tagsList.length > 0 ? tagsList : [categoryName, 'SINPO MEDIA'],
     comments: [],
-    isHero: item.is_hero || false,
+    isHero: Boolean(item.is_hero || item.is_headline),
     isInvestigative: categoryName === 'BONGKAR',
+    views: viewsCount,
+    dilihat: viewsCount,
+    caption: captionText,
   };
 }
+

@@ -17,6 +17,9 @@ import Toast from './components/Toast';
 import Logo from './components/Logo';
 import { Article, Comment } from './types';
 import { apiFetch, transformLaravelPostToArticle } from './lib/apiClient';
+import { parseAnyDate } from './lib/dateFormatter';
+import { stripHtml } from './lib/htmlRenderer';
+import StaticPageModal from './components/StaticPageModal';
 
 
 
@@ -75,24 +78,39 @@ export default function App() {
   const [breakingNewsList, setBreakingNewsList] = useState<string[]>([]);
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [popularNewsList, setPopularNewsList] = useState<Article[]>([]);
-  const [activePolling, setActivePolling] = useState<any>(null);
+  const [staticModalSlug, setStaticModalSlug] = useState<string | null>(null);
 
   // Fetch all live data exclusively from Laravel REST API
   useEffect(() => {
     async function fetchAllLiveData() {
-      // 1. Fetch main news
+      // 1. Fetch main news & headline
       try {
         const response = await apiFetch('/berita');
         if (response.success && Array.isArray(response.data)) {
           const liveArticles = response.data.map(transformLaravelPostToArticle);
           setArticlesState(liveArticles);
-          
-          const tickerItems = liveArticles.map(a => `${a.category}: ${a.title}`);
-          if (tickerItems.length > 0) setBreakingNewsList(tickerItems);
         }
       } catch (err) {
         console.log('Laravel REST API /berita: offline');
         setArticlesState([]);
+      }
+
+      // 1b. Fetch headline news specifically
+      try {
+        const headlineRes = await apiFetch('/headline');
+        if (headlineRes.success && headlineRes.data) {
+          const rawHeadline = Array.isArray(headlineRes.data) ? headlineRes.data[0] : headlineRes.data;
+          if (rawHeadline) {
+            const headlineArticle = transformLaravelPostToArticle(rawHeadline);
+            headlineArticle.isHero = true;
+            setArticlesState(prev => {
+              const filtered = prev.filter(a => a.id !== headlineArticle.id);
+              return [headlineArticle, ...filtered];
+            });
+          }
+        }
+      } catch (err) {
+        console.log('Laravel REST API /headline: offline');
       }
 
       // 2. Fetch categories
@@ -106,29 +124,70 @@ export default function App() {
         console.log('Laravel REST API /kategori: offline');
       }
 
-      // 3. Fetch popular news
+      // 3. Fetch popular news for sidebar & breaking news ticker (max 5)
       try {
-        const popRes = await apiFetch('/populer');
+        const popRes = await apiFetch('/populer?limit=5');
         if (popRes.success && Array.isArray(popRes.data)) {
-          const popArticles = popRes.data.map(transformLaravelPostToArticle);
+          const popArticles = popRes.data.map(transformLaravelPostToArticle).slice(0, 5);
           setPopularNewsList(popArticles);
+          
+          const popularTickerItems = popArticles.map(a => `${a.category}: ${a.title}`);
+          if (popularTickerItems.length > 0) {
+            setBreakingNewsList(popularTickerItems);
+          }
         }
       } catch (err) {
         console.log('Laravel REST API /populer: offline');
       }
-
-      // 4. Fetch active polling
-      try {
-        const pollRes = await apiFetch('/polling');
-        if (pollRes.success && Array.isArray(pollRes.data) && pollRes.data.length > 0) {
-          setActivePolling(pollRes.data[0]);
-        }
-      } catch (err) {
-        console.log('Laravel REST API /polling: offline');
-      }
     }
     fetchAllLiveData();
   }, []);
+
+  // Refetch news from Laravel API whenever category, search query, or tag changes
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchFilteredNews() {
+      try {
+        let endpoint = '/berita';
+        const params = new URLSearchParams();
+
+        if (submittedSearchQuery && submittedSearchQuery.trim()) {
+          params.append('q', submittedSearchQuery.trim());
+        }
+
+        if (selectedCategory && selectedCategory !== 'SEMUA' && selectedCategory !== 'INDEKS') {
+          let catQuery = selectedCategory.toLowerCase();
+          if (catQuery === 'ekonomi & bisnis') catQuery = 'ekbis';
+          params.append('kategori', catQuery);
+        }
+
+        if (selectedTag && selectedTag.trim()) {
+          params.append('tag', selectedTag.trim());
+        }
+
+        params.append('limit', '20');
+
+        const queryString = params.toString();
+        if (queryString) {
+          endpoint += `?${queryString}`;
+        }
+
+        const res = await apiFetch(endpoint);
+        if (isMounted && res.success && Array.isArray(res.data)) {
+          const articles = res.data.map(transformLaravelPostToArticle);
+          setArticlesState(articles);
+        }
+      } catch (err) {
+        console.log('Filtered news API fetch notice:', err);
+      }
+    }
+
+    fetchFilteredNews();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [submittedSearchQuery, selectedCategory, selectedTag]);
 
   // Loading & Skeleton State (automatic initial load, reload & navigation transition)
   const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
@@ -330,6 +389,36 @@ export default function App() {
     return articlesState.find((a) => a.id === selectedArticle.id) || selectedArticle;
   }, [articlesState, selectedArticle]);
 
+  // Dynamic Document Title based on current page / modal state
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if (activeModalArticle) {
+      document.title = `${stripHtml(activeModalArticle.title)} – SinPo.id`;
+    } else if (staticModalSlug) {
+      const staticTitleMap: Record<string, string> = {
+        'tentang-kami': 'Tentang Kami',
+        'redaksi': 'Susunan Redaksi',
+        'hak-jawab': 'Hak Jawab & Koreksi',
+        'hubungi-kami': 'Hubungi Kami',
+        'kebijakan-privasi': 'Kebijakan Privasi',
+        'pedoman-siber': 'Pedoman Pemberitaan Media Siber',
+      };
+      const pageTitle = staticTitleMap[staticModalSlug] || 'Halaman';
+      document.title = `${pageTitle} – SinPo.id`;
+    } else if (submittedSearchQuery && submittedSearchQuery.trim()) {
+      document.title = `Pencarian: "${submittedSearchQuery.trim()}" – SinPo.id`;
+    } else if (selectedTag && selectedTag.trim()) {
+      document.title = `Tag: #${selectedTag.trim()} – SinPo.id`;
+    } else if (selectedCategory === 'INDEKS') {
+      document.title = `Indeks Berita – SinPo.id`;
+    } else if (selectedCategory && selectedCategory !== 'SEMUA') {
+      document.title = `${selectedCategory.toUpperCase()} – SinPo.id`;
+    } else {
+      document.title = `SinPo.id – Matahari Indonesia`;
+    }
+  }, [activeModalArticle, staticModalSlug, submittedSearchQuery, selectedTag, selectedCategory]);
+
   // Cooperative Search & Category Filtering
   const filteredArticles = useMemo(() => {
     return articlesState.filter((article) => {
@@ -354,41 +443,6 @@ export default function App() {
     if (!submittedSearchQuery) return [];
     const query = submittedSearchQuery.toLowerCase();
     
-    const parseIndonesianDate = (dateStr: string): Date => {
-      try {
-        let cleanStr = dateStr;
-        if (dateStr.includes(',')) {
-          cleanStr = dateStr.split(',')[1].trim();
-        }
-        const parts = cleanStr.trim().split(/\s+/);
-        if (parts.length < 3) return new Date(0);
-        
-        const day = parseInt(parts[0], 10);
-        const monthStr = parts[1].toLowerCase();
-        const year = parseInt(parts[2], 10);
-        
-        const months: Record<string, number> = {
-          januari: 0, jan: 0,
-          februari: 1, feb: 1,
-          maret: 2, mar: 2,
-          april: 3, apr: 3,
-          mei: 4,
-          juni: 5, jun: 5,
-          juli: 6, jul: 6,
-          agustus: 7, agt: 7, ags: 7,
-          september: 8, sep: 8,
-          oktober: 9, okt: 9,
-          november: 10, nov: 10,
-          desember: 11, des: 11
-        };
-        
-        const month = months[monthStr] !== undefined ? months[monthStr] : 0;
-        return new Date(year, month, day);
-      } catch (e) {
-        return new Date(0);
-      }
-    };
-
     const filtered = articlesState.filter(art => {
       const matchQuery = art.title.toLowerCase().includes(query);
       if (!matchQuery) return false;
@@ -396,7 +450,7 @@ export default function App() {
 
       try {
         const [sYear, sMonth, sDay] = searchDate.split('-').map(num => parseInt(num, 10));
-        const artDate = parseIndonesianDate(art.date);
+        const artDate = parseAnyDate(art.date);
         return artDate.getFullYear() === sYear && 
                (artDate.getMonth() + 1) === sMonth && 
                artDate.getDate() === sDay;
@@ -407,8 +461,8 @@ export default function App() {
 
     // Sort by date descending (newest first)
     return [...filtered].sort((a, b) => {
-      const dateA = parseIndonesianDate(a.date);
-      const dateB = parseIndonesianDate(b.date);
+      const dateA = parseAnyDate(a.date);
+      const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
   }, [articlesState, submittedSearchQuery, searchDate]);
@@ -417,41 +471,6 @@ export default function App() {
   const tagMatchedArticles = useMemo(() => {
     if (!selectedTag) return [];
     const tagQuery = selectedTag.toLowerCase();
-    
-    const parseIndonesianDate = (dateStr: string): Date => {
-      try {
-        let cleanStr = dateStr;
-        if (dateStr.includes(',')) {
-          cleanStr = dateStr.split(',')[1].trim();
-        }
-        const parts = cleanStr.trim().split(/\s+/);
-        if (parts.length < 3) return new Date(0);
-        
-        const day = parseInt(parts[0], 10);
-        const monthStr = parts[1].toLowerCase();
-        const year = parseInt(parts[2], 10);
-        
-        const months: Record<string, number> = {
-          januari: 0, jan: 0,
-          februari: 1, feb: 1,
-          maret: 2, mar: 2,
-          april: 3, apr: 3,
-          mei: 4,
-          juni: 5, jun: 5,
-          juli: 6, jul: 6,
-          agustus: 7, agt: 7, ags: 7,
-          september: 8, sep: 8,
-          oktober: 9, okt: 9,
-          november: 10, nov: 10,
-          desember: 11, des: 11
-        };
-        
-        const month = months[monthStr] !== undefined ? months[monthStr] : 0;
-        return new Date(year, month, day);
-      } catch (e) {
-        return new Date(0);
-      }
-    };
 
     const filtered = articlesState.filter(art => {
       const matchTag = art.tags.some(t => t.toLowerCase() === tagQuery);
@@ -460,7 +479,7 @@ export default function App() {
 
       try {
         const [sYear, sMonth, sDay] = searchDate.split('-').map(num => parseInt(num, 10));
-        const artDate = parseIndonesianDate(art.date);
+        const artDate = parseAnyDate(art.date);
         return artDate.getFullYear() === sYear && 
                (artDate.getMonth() + 1) === sMonth && 
                artDate.getDate() === sDay;
@@ -471,8 +490,8 @@ export default function App() {
 
     // Sort by date descending (newest first)
     return [...filtered].sort((a, b) => {
-      const dateA = parseIndonesianDate(a.date);
-      const dateB = parseIndonesianDate(b.date);
+      const dateA = parseAnyDate(a.date);
+      const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
   }, [articlesState, selectedTag, searchDate]);
@@ -499,7 +518,11 @@ export default function App() {
     <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200 ${isDarkMode ? 'dark' : ''}`}>
       
       {/* A. Top Editorial Bar & Breaking News Ticker */}
-      <BreakingTicker items={breakingNewsList} />
+      <BreakingTicker 
+        items={breakingNewsList} 
+        articles={popularNewsList.length > 0 ? popularNewsList : articlesState}
+        onSelectArticle={handleSelectArticle}
+      />
 
       {/* B. Central Brand Header */}
       <Header
@@ -785,7 +808,7 @@ export default function App() {
                       </h2>
                       
                       <p className="font-sans text-[10px] sm:text-xs md:text-sm text-slate-300 leading-relaxed line-clamp-2 font-normal opacity-90">
-                        {heroArticle.content}
+                        {stripHtml(heroArticle.subtitle || heroArticle.summary || heroArticle.content)}
                       </p>
                       <div className="flex items-center justify-between border-t border-white/15 pt-3 sm:pt-4 mt-2">
                         <div className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-xs text-slate-300 font-sans">
@@ -842,9 +865,15 @@ export default function App() {
           {/* Standard Layout for category list (full-width for custom 3-column) */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pt-4 md:pt-6 pb-8 animate-fade-in">
             {(() => {
-              const categoryArticles = articlesState.filter(
-                (art) => art.category.toUpperCase() === selectedCategory.toUpperCase()
-              );
+              const matched = articlesState.filter((art) => {
+                const sel = selectedCategory.toUpperCase();
+                const artCat = art.category.toUpperCase();
+                if (sel === 'EKBIS' || sel === 'EKONOMI & BISNIS') {
+                  return artCat === 'EKBIS' || artCat === 'EKONOMI & BISNIS' || artCat === 'EKONOMI';
+                }
+                return artCat === sel || artCat.includes(sel) || sel.includes(artCat);
+              });
+              const categoryArticles = matched.length > 0 ? matched : articlesState;
               const heroArticle = categoryArticles.find((art) => art.isHero) || categoryArticles[0];
               const otherArticles = heroArticle 
                 ? categoryArticles.filter((art) => art.id !== heroArticle.id) 
@@ -885,7 +914,7 @@ export default function App() {
               </section>
 
               {/* Column 3: Sidebar widgets (1/3 width) */}
-              <section className="lg:col-span-1">
+              <section className="lg:col-span-1 lg:sticky lg:top-20 self-start">
                 <Sidebar 
                   onSelectPopular={handleSelectPopular} 
                   variant="home" 
@@ -968,7 +997,7 @@ export default function App() {
                   setSearchDate("");
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="hover:text-white transition-colors text-left"
+                className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 POLITIK
               </button>
@@ -983,7 +1012,7 @@ export default function App() {
                   setSearchDate("");
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="hover:text-white transition-colors text-left"
+                className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HUKUM
               </button>
@@ -998,7 +1027,7 @@ export default function App() {
                   setSearchDate("");
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="hover:text-white transition-colors text-left"
+                className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 EKONOMI & BISNIS
               </button>
@@ -1013,7 +1042,7 @@ export default function App() {
                   setSearchDate("");
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
-                className="hover:text-white transition-colors text-left"
+                className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 PERISTIWA
               </button>
@@ -1025,37 +1054,37 @@ export default function App() {
             <h4 className="font-sans font-extrabold uppercase tracking-widest text-[11px] text-slate-200">PERUSAHAAN</h4>
             <div className="flex flex-col gap-2 font-sans text-[11px] font-bold uppercase tracking-wider text-slate-500">
               <button 
-                onClick={() => triggerToast("Informasi Tentang Kami SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("tentang-kami")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 TENTANG KAMI
               </button>
               <button 
-                onClick={() => triggerToast("Susunan Redaksi SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("redaksi")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 REDAKSI
               </button>
               <button 
-                onClick={() => triggerToast("Layanan Hak Jawab SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("hak-jawab")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HAK JAWAB
               </button>
               <button 
-                onClick={() => triggerToast("Hubungi Redaksi & Manajemen SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("hubungi-kami")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HUBUNGI KAMI
               </button>
               <button 
-                onClick={() => triggerToast("Kebijakan Privasi SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("kebijakan-privasi")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 KEBIJAKAN PRIVASI
               </button>
               <button 
-                onClick={() => triggerToast("Pedoman Pemberitaan Media Siber SinPo.id", "info")}
+                onClick={() => setStaticModalSlug("pedoman-siber")}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 PEDOMAN PEMBERITAAN MEDIA SIBER
@@ -1083,6 +1112,12 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Static Page Modal (Redaksi, Pedoman Siber, Tentang Kami, etc.) */}
+      <StaticPageModal
+        slug={staticModalSlug}
+        onClose={() => setStaticModalSlug(null)}
+      />
 
     </div>
   );

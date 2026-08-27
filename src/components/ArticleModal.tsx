@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle } from 'lucide-react';
 import { Article, Comment } from '../types';
+import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
 
 interface ArticleModalProps {
   article: Article | null;
@@ -23,8 +24,6 @@ export default function ArticleModal({
   onShare
 }: ArticleModalProps) {
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
-  const [name, setName] = useState('');
-  const [commentText, setCommentText] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -52,7 +51,7 @@ export default function ArticleModal({
       window.speechSynthesis.cancel(); // Stop any other running synthesis
 
       // Clean the text to avoid reading HTML codes
-      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${article.content.replace(/\n\n/g, ". ")}`;
+      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${stripHtml(article.content)}`;
       
       const utterance = new SpeechSynthesisUtterance(contentToRead);
       utterance.lang = 'id-ID';
@@ -88,14 +87,7 @@ export default function ArticleModal({
 
   const isBookmarked = bookmarkedIds.includes(article.id);
 
-  const handleCommentSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !commentText.trim()) return;
 
-    onAddComment(article.id, name.trim(), commentText.trim());
-    setName('');
-    setCommentText('');
-  };
 
   const handleShareClick = () => {
     const url = `https://sinpo.id/artikel/${article.id}`;
@@ -231,7 +223,7 @@ export default function ArticleModal({
               {/* Subtitle / Teaser */}
               {article.subtitle && (
                 <p className="font-sans text-sm md:text-base text-slate-600 dark:text-slate-400 border-l-4 border-brand-red-600 pl-4 py-1 italic">
-                  {article.subtitle}
+                  {stripHtml(article.subtitle)}
                 </p>
               )}
 
@@ -254,31 +246,31 @@ export default function ArticleModal({
                   className="w-full h-full object-cover"
                 />
               </div>
+              <div className="-mt-2 text-xs text-slate-400 dark:text-slate-500 italic font-sans px-1">
+                <span>{article.caption ? `Foto: ${article.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
+              </div>
 
               {/* Interactive Audio Warning for Indonesian Readers */}
               {isSpeaking && (
                 <div className="bg-brand-red-50 dark:bg-brand-red-950/20 border border-brand-red-200 dark:border-brand-red-950 rounded-lg p-3.5 flex items-center gap-3">
                   <span className="h-2 w-2 rounded-full bg-brand-red-600 animate-ping shrink-0" />
                   <p className="text-xs font-sans text-brand-red-800 dark:text-brand-red-400">
-                    Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk menulis komentar di bawah.
+                    Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk membaca artikel.
                   </p>
                 </div>
               )}
 
               {/* Article Paragraph Content */}
               <div
-                className={`font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 flex flex-col gap-5 ${
+                className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 ${
                   fontSize === 'sm'
                     ? "text-sm"
                     : fontSize === 'base'
                       ? "text-base"
                       : "text-lg md:text-xl"
                 }`}
-              >
-                {article.content.split('\n\n').map((paragraph, index) => (
-                  <p key={index}>{paragraph}</p>
-                ))}
-              </div>
+                dangerouslySetInnerHTML={{ __html: formatArticleHtml(article.content) }}
+              />
 
               {/* Article Tags */}
               <div className="flex flex-wrap gap-2 pt-4 border-t border-slate-100 dark:border-slate-900">
@@ -293,22 +285,15 @@ export default function ArticleModal({
               </div>
 
               {/* C. Dynamic Comment System Section */}
-              <section id="article-comments-block" className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8">
-                <div className="flex items-center gap-2 mb-6">
-                  <MessageSquare className="h-5 w-5 text-brand-red-600" />
-                  <h3 className="font-sans text-base font-bold tracking-wider uppercase text-slate-950 dark:text-white">
-                    Kolom Opini Publik ({article.comments.length})
-                  </h3>
-                </div>
-
-                {/* Empty State */}
-                {article.comments.length === 0 ? (
-                  <div className="text-center py-6 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200/50 dark:border-slate-800/50 mb-6">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-sans">
-                      Belum ada komentar untuk berita ini. Jadilah yang pertama memberikan tanggapan Anda!
-                    </p>
+              {article.comments && article.comments.length > 0 && (
+                <section id="article-comments-block" className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8">
+                  <div className="flex items-center gap-2 mb-6">
+                    <MessageSquare className="h-5 w-5 text-brand-red-600" />
+                    <h3 className="font-sans text-base font-bold tracking-wider uppercase text-slate-950 dark:text-white">
+                      Kolom Opini Publik ({article.comments.length})
+                    </h3>
                   </div>
-                ) : (
+
                   <div className="flex flex-col gap-4 mb-6">
                     {article.comments.map((c) => (
                       <div key={c.id} className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200/40 dark:border-slate-800/40 flex flex-col gap-1.5 font-sans">
@@ -320,39 +305,8 @@ export default function ArticleModal({
                       </div>
                     ))}
                   </div>
-                )}
-
-                {/* New Comment Submission Form */}
-                <form onSubmit={handleCommentSubmit} className="flex flex-col gap-3 font-sans">
-                  <h4 className="font-sans text-xs uppercase font-bold tracking-wider text-slate-400 mb-1">
-                    KIRIM TANGGAPAN ANDA
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      required
-                      placeholder="Nama lengkap Anda..."
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="px-3.5 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-red-600 focus:border-transparent"
-                    />
-                  </div>
-                  <textarea
-                    required
-                    rows={3}
-                    placeholder="Tuliskan gagasan, opini, atau kritik Anda secara bijak..."
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    className="px-3.5 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-red-600 focus:border-transparent resize-none"
-                  />
-                  <button
-                    type="submit"
-                    className="self-end bg-brand-red-600 hover:bg-brand-red-700 text-white font-sans text-xs uppercase font-bold tracking-wider px-5 py-2 rounded-lg shadow-sm transition-all"
-                  >
-                    Kirim Opini
-                  </button>
-                </form>
-              </section>
+                </section>
+              )}
 
             </div>
 

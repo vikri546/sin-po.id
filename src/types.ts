@@ -7,6 +7,7 @@ export interface Comment {
 
 export interface Article {
   id: string;
+  slug?: string;
   title: string;
   subtitle: string;
   summary: string;
@@ -20,6 +21,9 @@ export interface Article {
   comments: Comment[];
   isInvestigative?: boolean;
   isHero?: boolean;
+  views?: number;
+  dilihat?: number;
+  caption?: string;
 }
 
 export interface TimelineEvent {

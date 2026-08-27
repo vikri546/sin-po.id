@@ -19,8 +19,11 @@ interface ArticleDetailViewProps {
   isLoading?: boolean;
 }
 
+import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
+import { apiFetch } from '../lib/apiClient';
+
 const calculateSpeechDuration = (title: string, author: string, content: string): number => {
-  const text = `${title}. Ditulis oleh ${author}. ${content.replace(/\n\n/g, ". ")}`;
+  const text = `${title}. Ditulis oleh ${author}. ${stripHtml(content)}`;
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.max(30, Math.round((words / 160) * 60));
 };
@@ -113,8 +116,6 @@ export default function ArticleDetailView({
     );
   }
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
-  const [name, setName] = useState('');
-  const [commentText, setCommentText] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechProgress, setSpeechProgress] = useState(0); // in seconds
   const [speechDuration, setSpeechDuration] = useState(() => 
@@ -122,6 +123,7 @@ export default function ArticleDetailView({
   );
   const [isDragging, setIsDragging] = useState(false);
   
+  const [liveViews, setLiveViews] = useState<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Initialize duration dynamically based on word count whenever article changes
@@ -129,12 +131,35 @@ export default function ArticleDetailView({
     const seconds = calculateSpeechDuration(article.title, article.author, article.content);
     setSpeechDuration(seconds);
     setSpeechProgress(0);
+    setLiveViews(null);
   }, [article]);
 
   // Instant scroll to top when mounting a new article detail page
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
-  }, [article.id]);
+
+    // Fetch fresh article detail and trigger view count on Laravel API backend
+    async function triggerArticleView() {
+      try {
+        const rawId = article.id.replace('laravel-', '');
+        const targetIdOrSlug = (article as any).slug || rawId;
+        const res = await apiFetch(`/berita/${targetIdOrSlug}`);
+        if (res && res.data) {
+          const count = typeof res.data.dilihat === 'number' 
+            ? res.data.dilihat 
+            : (typeof res.data.views === 'number' 
+                ? res.data.views 
+                : (parseInt(res.data.dilihat || res.data.views || '0', 10) || 0));
+          if (count > 0) {
+            setLiveViews(count);
+          }
+        }
+      } catch (err) {
+        // Silent catch if offline
+      }
+    }
+    triggerArticleView();
+  }, [article.id, (article as any).slug]);
 
   // Handle ticking progress when TTS is active
   useEffect(() => {
@@ -174,7 +199,7 @@ export default function ArticleDetailView({
       setSpeechProgress(0);
 
       // Clean the text to avoid reading HTML codes
-      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${article.content.replace(/\n\n/g, ". ")}`;
+      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${stripHtml(article.content)}`;
       
       const utterance = new SpeechSynthesisUtterance(contentToRead);
       utterance.lang = 'id-ID';
@@ -213,7 +238,7 @@ export default function ArticleDetailView({
       }
       window.speechSynthesis.cancel();
       
-      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${article.content.replace(/\n\n/g, ". ")}`;
+      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${stripHtml(article.content)}`;
       const percentage = newSeconds / speechDuration;
       const startCharIndex = Math.floor(percentage * contentToRead.length);
       const remainingText = contentToRead.substring(startCharIndex);
@@ -261,14 +286,7 @@ export default function ArticleDetailView({
 
   const isBookmarked = bookmarkedIds.includes(article.id);
 
-  const handleCommentSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !commentText.trim()) return;
 
-    onAddComment(article.id, name.trim(), commentText.trim());
-    setName('');
-    setCommentText('');
-  };
 
   const handleShareClick = () => {
     const url = `${window.location.origin}/artikel/${article.id}`;
@@ -372,7 +390,7 @@ export default function ArticleDetailView({
           </span>
           <span className="text-slate-300 dark:text-slate-800 shrink-0 select-none">•</span>
           <span className="flex items-center gap-1 md:gap-1.5 shrink-0">
-            <Eye className="hidden md:inline h-4 w-4 text-brand-red-600" /> Dilihat: <strong className="ml-0.5">{Math.abs(article.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) * 7 + 125} kali</strong>
+            <Eye className="hidden md:inline h-4 w-4 text-brand-red-600" /> Dilihat: <strong className="ml-0.5">{(liveViews ?? article.views ?? article.dilihat ?? 0).toLocaleString('id-ID')} kali</strong>
           </span>
         </div>
 
@@ -385,9 +403,8 @@ export default function ArticleDetailView({
             className="w-full h-full object-cover rounded-[5px]"
           />
         </div>
-        <div className="-mt-3.5 text-xs text-slate-400 dark:text-slate-500 italic font-sans flex justify-between px-1">
-          <span>Foto: Dok. Istimewa / Ilustrasi</span>
-          <span>Sumber: Redaksi</span>
+        <div className="-mt-3.5 text-xs text-slate-400 dark:text-slate-500 italic font-sans px-1">
+          <span>{article.caption ? `Foto: ${article.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
         </div>
 
         {/* Dynamic Toolbars (TTS, Bookmark, Share, Font Size) & Progress Player Block - Placed after Image */}
@@ -480,7 +497,7 @@ export default function ArticleDetailView({
           <div className="bg-brand-red-50 dark:bg-brand-red-950/20 border border-brand-red-200 dark:border-brand-red-950 rounded-lg p-3.5 flex items-center gap-3">
             <span className="h-2 w-2 rounded-full bg-brand-red-600 animate-ping shrink-0" />
             <p className="text-xs font-sans text-brand-red-800 dark:text-brand-red-400">
-              Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk menulis komentar di bawah.
+              Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk membaca artikel.
             </p>
           </div>
         )}
@@ -489,18 +506,15 @@ export default function ArticleDetailView({
         <div className="relative flex flex-col gap-6 pb-12 md:pb-0">
           {/* Article Paragraph Content */}
           <div
-            className={`font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 flex flex-col gap-6 ${
+            className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 ${
               fontSize === 'sm'
                 ? "text-sm"
                 : fontSize === 'base'
                   ? "text-base"
                   : "text-lg md:text-xl"
             }`}
-          >
-            {article.content.split('\n\n').map((paragraph, index) => (
-              <p key={index}>{paragraph}</p>
-            ))}
-          </div>
+            dangerouslySetInnerHTML={{ __html: formatArticleHtml(article.content) }}
+          />
 
           {/* Article Tags */}
           <div className="flex flex-wrap items-center gap-2 pt-4 border-b border-slate-100 dark:border-slate-900/40 pb-4">
@@ -672,54 +686,14 @@ export default function ArticleDetailView({
         })()}
 
         {/* Comments Block */}
-        <section id="article-comments-block" className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8">
-          <div className="flex items-center gap-2 mb-6">
-            <h3 className="font-sans text-base font-bold tracking-wider uppercase text-slate-950 dark:text-white">
-              Kolom Opini Publik ({article.comments.length})
-            </h3>
-          </div>
+        {article.comments && article.comments.length > 0 && (
+          <section id="article-comments-block" className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8">
+            <div className="flex items-center gap-2 mb-6">
+              <h3 className="font-sans text-base font-bold tracking-wider uppercase text-slate-950 dark:text-white">
+                Kolom Opini Publik ({article.comments.length})
+              </h3>
+            </div>
 
-          {/* Comment submission Form */}
-          <form onSubmit={handleCommentSubmit} className="flex flex-col gap-4 font-sans bg-slate-100/40 dark:bg-slate-900/40 p-5 rounded-[5px] border border-slate-200/50 dark:border-slate-800/50 mb-6">
-            <h4 className="font-sans text-xs uppercase font-bold tracking-wider text-slate-500 mb-1">
-              KIRIM TANGGAPAN ANDA
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <input
-                type="text"
-                required
-                placeholder="Nama lengkap Anda..."
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="px-3.5 py-2 text-xs rounded-[5px] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-red-600 focus:border-transparent"
-              />
-            </div>
-            <textarea
-              required
-              rows={4}
-              placeholder="Tuliskan gagasan, opini, atau kritik Anda secara bijak..."
-              value={commentText}
-              onChange={(e) => setCommentText(e.target.value)}
-              className="px-3.5 py-2 text-xs rounded-[5px] border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-red-600 focus:border-transparent resize-none"
-            />
-            <div className="flex items-center justify-end">
-              <button
-                type="submit"
-                className="bg-brand-red-600 hover:bg-brand-red-700 text-white font-sans text-[10px] sm:text-xs uppercase font-bold tracking-wider px-3.5 py-1.5 sm:px-5 sm:py-2 rounded-[5px] shadow-sm transition-all cursor-pointer"
-              >
-                Kirim Opini
-              </button>
-            </div>
-          </form>
-
-          {/* Empty State */}
-          {article.comments.length === 0 ? (
-            <div className="text-center py-8 bg-slate-100/50 dark:bg-slate-900/50 rounded-[5px] border border-slate-200/50 dark:border-slate-800/50">
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-sans">
-                Belum ada komentar untuk berita ini. Jadilah yang pertama memberikan tanggapan Anda!
-              </p>
-            </div>
-          ) : (
             <div className="flex flex-col gap-4">
               {article.comments.map((c) => (
                 <div key={c.id} className="p-4 rounded-[5px] bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/40 dark:border-slate-800/40 flex flex-col gap-1.5 font-sans">
@@ -743,8 +717,8 @@ export default function ArticleDetailView({
                 </div>
               ))}
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
       </div>
 

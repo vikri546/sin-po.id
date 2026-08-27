@@ -32,10 +32,10 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
   }, [articles]);
 
   const allBeritaLainnya = useMemo(() => {
-    if (articles.length > 8) {
-      return articles.slice(8);
+    if (articles.length > 7) {
+      return articles.slice(7);
     }
-    return articles;
+    return [];
   }, [articles]);
 
   const displayArticles = useMemo(() => {

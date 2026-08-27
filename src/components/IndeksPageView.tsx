@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, X, Loader2, Search, Filter } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
+import { parseAnyDate } from '../lib/dateFormatter';
 
 interface IndeksPageViewProps {
   articles: Article[];
@@ -112,41 +113,6 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
     };
   }, [isModalOpen]);
 
-  const parseIndonesianDate = (dateStr: string): Date => {
-    try {
-      let cleanStr = dateStr;
-      if (dateStr.includes(',')) {
-        cleanStr = dateStr.split(',')[1].trim();
-      }
-      const parts = cleanStr.trim().split(/\s+/);
-      if (parts.length < 3) return new Date(0);
-      
-      const day = parseInt(parts[0], 10);
-      const monthStr = parts[1].toLowerCase();
-      const year = parseInt(parts[2], 10);
-      
-      const months: Record<string, number> = {
-        januari: 0, jan: 0,
-        februari: 1, feb: 1,
-        maret: 2, mar: 2,
-        april: 3, apr: 3,
-        mei: 4,
-        juni: 5, jun: 5,
-        juli: 6, jul: 6,
-        agustus: 7, agt: 7, ags: 7,
-        september: 8, sep: 8,
-        oktober: 9, okt: 9,
-        november: 10, nov: 10,
-        desember: 11, des: 11
-      };
-      
-      const month = months[monthStr] !== undefined ? months[monthStr] : 0;
-      return new Date(year, month, day);
-    } catch (e) {
-      return new Date(0);
-    }
-  };
-
   // Filter and sort articles (newest to oldest)
   const filteredAndSortedArticles = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -161,7 +127,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       if (searchDate) {
         try {
           const [sYear, sMonth, sDay] = searchDate.split('-').map(num => parseInt(num, 10));
-          const artDate = parseIndonesianDate(art.date);
+          const artDate = parseAnyDate(art.date);
           if (
             artDate.getFullYear() !== sYear ||
             (artDate.getMonth() + 1) !== sMonth ||
@@ -187,8 +153,8 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
 
     // Sort newest first
     return [...result].sort((a, b) => {
-      const dateA = parseIndonesianDate(a.date);
-      const dateB = parseIndonesianDate(b.date);
+      const dateA = parseAnyDate(a.date);
+      const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
   }, [articles, searchQuery, searchDate, selectedCategories]);

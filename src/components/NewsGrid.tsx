@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import gsap from 'gsap';
-import { Bookmark, Clock, User, ArrowRight, Eye, Calendar, Sparkles } from 'lucide-react';
+import { Bookmark, Clock, User, ArrowRight, Eye, Calendar } from 'lucide-react';
 import { Article } from '../types';
 import { POPULAR_NEWS } from '../data/newsData';
 import Skeleton from './skeletons/Skeleton';
@@ -144,16 +144,15 @@ export default function NewsGrid({
     }
   };
 
-  const heroArticle = articles[0];
-  const gridArticles = articles.slice(1, 8);
+  const heroArticle = articles.find(a => a.isHero) || articles[0];
+  const gridArticles = articles.filter(a => a.id !== heroArticle?.id).slice(0, 6);
 
   if (articles.length === 0) {
     return (
-      <div id="empty-news-state" className="text-center py-16 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
-        <Sparkles className="h-10 w-10 text-slate-400 mx-auto mb-4" />
-        <h4 className="font-sans text-base font-semibold text-slate-800 dark:text-white">Tidak Ada Berita Ditemukan</h4>
-        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-2 font-sans px-4">
-          Kami tidak menemukan berita yang cocok dengan filter pencarian atau kategori Anda saat ini. Silakan coba kata kunci lain atau bersihkan penyaring Penanda.
+      <div id="empty-news-state" className="text-center py-12 px-4 border border-slate-200 dark:border-slate-800 rounded-[5px] bg-white dark:bg-slate-950">
+        <h4 className="font-sans text-sm md:text-base font-bold text-slate-800 dark:text-slate-200">Tidak Ada Berita Ditemukan</h4>
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1.5 font-sans leading-relaxed">
+          Belum ada berita yang tersedia untuk kategori atau pencarian ini.
         </p>
       </div>
     );
@@ -220,7 +219,7 @@ export default function NewsGrid({
                 <span className="text-white/40 shrink-0">•</span>
                 <span className="flex items-center gap-1 shrink-0">
                   <Eye className="h-3 w-3 md:h-3.5 md:w-3.5 text-white hidden md:block" /> 
-                  <span>{((heroArticle.title.length * 43) % 1500) + 1200} dilihat</span>
+                  <span>{(heroArticle.views ?? heroArticle.dilihat ?? 0).toLocaleString('id-ID')} dilihat</span>
                 </span>
               </div>
 
@@ -240,7 +239,7 @@ export default function NewsGrid({
                 </div>
 
                 <p className="text-[11px] font-sans italic text-white/60">
-                  Foto: Unsplash/Ilustrasi
+                  {heroArticle.caption ? `Foto: ${heroArticle.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}
                 </p>
               </div>
             </div>

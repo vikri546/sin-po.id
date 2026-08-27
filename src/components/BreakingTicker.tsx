@@ -1,15 +1,79 @@
 "use client";
 
 import React from 'react';
-import { BREAKING_NEWS } from '../data/newsData';
 import { motion, AnimatePresence } from 'motion/react';
+
+import { Article } from '../types';
+import { apiFetch, transformLaravelPostToArticle } from '../lib/apiClient';
+import { stripHtml } from '../lib/htmlRenderer';
+
+interface TickerItem {
+  text: string;
+  article?: Article;
+}
 
 interface BreakingTickerProps {
   items?: string[];
+  articles?: Article[];
+  onSelectArticle?: (article: Article) => void;
 }
 
-export default function BreakingTicker({ items }: BreakingTickerProps) {
-  const newsItems = (items && items.length > 0) ? items : BREAKING_NEWS;
+export default function BreakingTicker({ items, articles, onSelectArticle }: BreakingTickerProps) {
+  const [fetchedArticles, setFetchedArticles] = React.useState<Article[]>([]);
+
+  React.useEffect(() => {
+    if ((!items || items.length === 0) && (!articles || articles.length === 0)) {
+      async function fetchTickerData() {
+        try {
+          const res = await apiFetch('/populer?limit=5');
+          if (res.success && Array.isArray(res.data)) {
+            const transformed = res.data.slice(0, 5).map(transformLaravelPostToArticle);
+            setFetchedArticles(transformed);
+          }
+        } catch (e) {
+          // offline fallback
+        }
+      }
+      fetchTickerData();
+    }
+  }, [items, articles]);
+
+  const rawTickerItems = React.useMemo<TickerItem[]>(() => {
+    // 1. If explicit Article objects are passed, build TickerItems directly from them
+    const articleList = (articles && articles.length > 0) 
+      ? articles.slice(0, 5) 
+      : (fetchedArticles.length > 0 ? fetchedArticles.slice(0, 5) : []);
+
+    if (articleList.length > 0) {
+      return articleList.map(a => ({
+        text: `${a.category}: ${a.title}`,
+        article: a,
+      }));
+    }
+
+    // 2. If raw string items passed
+    if (items && items.length > 0) {
+      return items.slice(0, 5).map(str => ({
+        text: str,
+      }));
+    }
+
+    return [];
+  }, [items, articles, fetchedArticles]);
+
+  const newsItems = React.useMemo<TickerItem[]>(() => {
+    if (rawTickerItems.length === 0) {
+      return [{ text: 'SINPO MEDIA: Berita Terkini & Terpopuler' }];
+    }
+    if (rawTickerItems.length === 1) {
+      return [rawTickerItems[0], rawTickerItems[0], rawTickerItems[0], rawTickerItems[0]];
+    }
+    if (rawTickerItems.length === 2) {
+      return [rawTickerItems[0], rawTickerItems[1], rawTickerItems[0], rawTickerItems[1]];
+    }
+    return rawTickerItems;
+  }, [rawTickerItems]);
+
   const [showDate, setShowDate] = React.useState(true);
   const [currentTime, setCurrentTime] = React.useState(new Date());
   const [isPaused, setIsPaused] = React.useState(false);
@@ -51,6 +115,12 @@ export default function BreakingTicker({ items }: BreakingTickerProps) {
     return `${hours}:${minutes}:${seconds}`;
   };
 
+  const handleItemClick = (item: TickerItem) => {
+    if (item.article && onSelectArticle) {
+      onSelectArticle(item.article);
+    }
+  };
+
   return (
     <div id="breaking-news-bar" className="bg-slate-900 text-white text-xs border-b border-slate-800 flex items-center h-10 px-4 md:px-8 justify-between select-none">
       {/* Left Label & Running Marquee */}
@@ -76,17 +146,27 @@ export default function BreakingTicker({ items }: BreakingTickerProps) {
           >
             {/* Track 1 */}
             <div className="flex shrink-0">
-              {newsItems.map((news, idx) => (
-                <span key={`t1-${idx}`} className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0">
-                  • {news}
+              {newsItems.map((item, idx) => (
+                <span 
+                  key={`t1-${idx}`} 
+                  onClick={() => handleItemClick(item)}
+                  className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer"
+                  title={item.article ? `Baca: ${item.article.title}` : undefined}
+                >
+                  • {item.text}
                 </span>
               ))}
             </div>
             {/* Track 2 (seamless clone) */}
             <div className="flex shrink-0">
-              {newsItems.map((news, idx) => (
-                <span key={`t2-${idx}`} className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0">
-                  • {news}
+              {newsItems.map((item, idx) => (
+                <span 
+                  key={`t2-${idx}`} 
+                  onClick={() => handleItemClick(item)}
+                  className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer"
+                  title={item.article ? `Baca: ${item.article.title}` : undefined}
+                >
+                  • {item.text}
                 </span>
               ))}
             </div>
