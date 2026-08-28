@@ -466,12 +466,7 @@ export default function ArticleDetailView({
           {article.title}
         </h1>
 
-        {/* Subtitle / Ringkasan Deskripsi Teaser */}
-        {(article.subtitle || article.summary) && (
-          <p className="font-sans text-base md:text-lg text-slate-600 dark:text-slate-300 border-l-4 border-brand-red-600 pl-4 py-1.5 italic font-medium leading-relaxed">
-            {stripHtml(article.subtitle || article.summary)}
-          </p>
-        )}
+
 
         {/* Share Section (Bagikan: WA FB X IG IN) */}
         <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 -mt-2">
@@ -528,17 +523,17 @@ export default function ArticleDetailView({
         </div>
 
         {/* Author & Read Time Info */}
-        <div className="flex flex-nowrap items-center justify-center md:justify-start gap-x-1.5 min-[375px]:gap-x-3 sm:gap-x-4 md:gap-x-6 py-3 border-y border-slate-200/60 dark:border-slate-800/60 text-[8.5px] min-[375px]:text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-sans overflow-x-auto no-scrollbar whitespace-nowrap">
-          <span className="flex items-center gap-1 md:gap-1.5 shrink-0">
-            <User className="hidden md:inline h-4 w-4 text-brand-red-600" /> Wartawan: <strong className="ml-0.5">{article.author}</strong>
+        <div className="w-full flex flex-nowrap items-center justify-start gap-3 sm:gap-4 md:gap-6 py-3 px-0.5 border-y border-slate-200/60 dark:border-slate-800/60 text-xs sm:text-xs md:text-sm text-slate-500 dark:text-slate-400 font-sans overflow-x-auto no-scrollbar whitespace-nowrap">
+          <span className="flex items-center gap-1.5 shrink-0">
+            <User className="h-4 w-4 text-brand-red-600 shrink-0" /> Wartawan: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{article.author}</strong>
           </span>
-          <span className="text-slate-300 dark:text-slate-800 shrink-0 select-none">•</span>
-          <span className="flex items-center gap-1 md:gap-1.5 shrink-0">
-            <Clock className="hidden md:inline h-4 w-4 text-brand-red-600" /> Estimasi: <strong className="ml-0.5">{formatTime(speechDuration)} {speechDuration >= 60 ? 'Menit' : 'Detik'}</strong>
+          <span className="text-slate-300 dark:text-slate-700 shrink-0 select-none">•</span>
+          <span className="flex items-center gap-1.5 shrink-0">
+            <Clock className="h-4 w-4 text-brand-red-600 shrink-0" /> Estimasi: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{formatTime(speechDuration)} {speechDuration >= 60 ? 'Menit' : 'Detik'}</strong>
           </span>
-          <span className="text-slate-300 dark:text-slate-800 shrink-0 select-none">•</span>
-          <span className="flex items-center gap-1 md:gap-1.5 shrink-0">
-            <Eye className="hidden md:inline h-4 w-4 text-brand-red-600" /> Dilihat: <strong className="ml-0.5">{(liveViews ?? article.views ?? article.dilihat ?? 0).toLocaleString('id-ID')} kali</strong>
+          <span className="text-slate-300 dark:text-slate-700 shrink-0 select-none">•</span>
+          <span className="flex items-center gap-1.5 shrink-0">
+            <Eye className="h-4 w-4 text-brand-red-600 shrink-0" /> Dilihat: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{(liveViews ?? article.views ?? article.dilihat ?? 0).toLocaleString('id-ID')} kali</strong>
           </span>
         </div>
 
@@ -557,19 +552,19 @@ export default function ArticleDetailView({
                 className="w-full h-full object-cover transition-all duration-300"
               />
 
-              {/* Prev Button */}
+              {/* Prev Button - Hidden on mobile, visible on desktop hover */}
               <button
                 onClick={() => setActiveImageIndex((prev) => (prev > 0 ? prev - 1 : allGalleryImages.length - 1))}
-                className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-90 sm:opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-lg active:scale-95"
+                className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 cursor-pointer shadow-lg active:scale-95 z-10"
                 title="Foto Sebelumnya"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
 
-              {/* Next Button */}
+              {/* Next Button - Hidden on mobile, visible on desktop hover */}
               <button
                 onClick={() => setActiveImageIndex((prev) => (prev < allGalleryImages.length - 1 ? prev + 1 : 0))}
-                className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-90 sm:opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-lg active:scale-95"
+                className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 cursor-pointer shadow-lg active:scale-95 z-10"
                 title="Foto Selanjutnya"
               >
                 <ChevronRight className="w-5 h-5" />
