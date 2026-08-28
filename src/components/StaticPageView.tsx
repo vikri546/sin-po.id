@@ -12,19 +12,20 @@ interface StaticPageViewProps {
   onNavigateHome?: () => void;
 }
 
-// Numeric ID mapping matching CMS backend channel API endpoints
-const STATIC_ID_MAP: Record<string, number> = {
-  'tentang-kami': 10,
-  'redaksi': 11,
-  'hak-jawab': 8,
-  'hubungi-kami': 9,
-  'kontak-kami': 9,
-  'kontak': 9,
-  'kebijakan-privasi': 14,
-  'privacy-policy': 14,
-  'syarat-dan-ketentuan': 14,
-  'pedoman-siber': 13,
-  'pedoman-pemberitaan-media-siber': 13,
+// Numeric ID mapping matching CMS backend channel API endpoints & id_statis
+const STATIC_ID_MAP: Record<string, { id_statis: number; id_channel: number }> = {
+  'tentang-kami': { id_statis: 10, id_channel: 10 },
+  'redaksi': { id_statis: 7, id_channel: 11 },
+  'pedoman-siber': { id_statis: 12, id_channel: 13 },
+  'pedoman-pemberitaan-media-siber': { id_statis: 12, id_channel: 13 },
+  'syarat-dan-ketentuan': { id_statis: 11, id_channel: 14 },
+  'kebijakan-privasi': { id_statis: 11, id_channel: 14 },
+  'privacy-policy': { id_statis: 11, id_channel: 14 },
+  'kontak': { id_statis: 9, id_channel: 9 },
+  'kontak-kami': { id_statis: 9, id_channel: 9 },
+  'hubungi-kami': { id_statis: 9, id_channel: 9 },
+  'disclaimer': { id_statis: 8, id_channel: 12 },
+  'hak-jawab': { id_statis: 8, id_channel: 12 },
 };
 
 const STATIC_TITLE_MAP: Record<string, { title: string; icon: any }> = {
@@ -60,13 +61,10 @@ const STATIC_FALLBACKS: Record<string, { title: string; content: string }> = {
       <h3>PT CATRA MEDIA NUSANTARA</h3>
       <p><strong>Penanggung Jawab / Pemimpin Redaksi:</strong> Budi Santoso</p>
       <p><strong>Pemimpin Perusahaan:</strong> PT Catra Media Nusantara</p>
-      <p><strong>Redaktur Pelaksana:</strong> Ahmad Hidayat</p>
-      <p><strong>Redaktur Senior:</strong> Siti Rahmawati, Rian Hidayat</p>
-      <p><strong>Tim Investigasi BONGKAR:</strong> Hendra Wijaya, Dian Lestari</p>
-      <p><strong>Tim Liputan & Reporter:</strong> Tim Jurnalistik SinPo Media Jakarta</p>
+      <p><strong>Tim Redaksi:</strong> Tim Jurnalistik SinPo Media Jakarta</p>
       <p><strong>Sekretaris Redaksi & IT Support:</strong> Divisi Digital SinPo Media</p>
       <hr />
-      <p><em>Alamat Redaksi: Gedung Sin Po Media, Lt. 3, Jakarta Selatan, DKI Jakarta 12190</em></p>
+      <p><em>Alamat Redaksi: Gedung Senatama, Lt. 3, Jln. Kramat Kwitang No. 8, Kwitang, Senen, Jakarta Pusat 10420</em></p>
     `
   },
   'hak-jawab': {
@@ -88,7 +86,7 @@ const STATIC_FALLBACKS: Record<string, { title: string; content: string }> = {
       <p>Kami menyambut baik pertanyaan, masukan, kerja sama iklan, maupun pengiriman siaran pers (press release) dari instansi, lembaga, dan masyarakat.</p>
       <hr />
       <h3>Kontak Resmi Redaksi & Manajemen:</h3>
-      <p><strong>Alamat Kantor Redaksi:</strong><br />Gedung Sin Po Media, Lt. 3, Jakarta Selatan, DKI Jakarta 12190</p>
+      <p><strong>Alamat Kantor Redaksi:</strong><br />Gedung Senatama, Lt. 3, Jln. Kramat Kwitang No. 8, Kwitang, Senen, Jakarta Pusat 10420</p>
       <p><strong>Email Redaksi & Press Release:</strong><br />redaksi@sinpo.id</p>
       <p><strong>Email Kerja Sama & Iklan:</strong><br />iklan@sinpo.id</p>
       <p><strong>Telepon / Layanan Pengaduan:</strong><br />+62 812-3456-7890 (Hari Kerja 09.00 - 17.00 WIB)</p>
@@ -132,27 +130,50 @@ export default function StaticPageView({ slug, isLoading = false, onNavigateHome
 
     async function fetchStaticContent(showLoader: boolean = true) {
       if (showLoader) setIsFetching(true);
-      const numericId = STATIC_ID_MAP[slug] || slug;
+      const targetMap = STATIC_ID_MAP[slug];
 
       try {
-        // Try CMS numeric endpoint /statis/{id} matching sinpo 2 with real-time cache busting
-        let res = await apiFetch(`/statis/${numericId}`);
-        if (!res.success || !res.data) {
-          // Fallback to text slug if needed
-          res = await apiFetch(`/statis/${slug}`);
+        let matchedItem: any = null;
+
+        // 1. Query full CMS /statis list
+        const listRes = await apiFetch('/statis');
+        if (listRes.success && Array.isArray(listRes.data)) {
+          matchedItem = listRes.data.find((item: any) => {
+            if (targetMap && (item.id_statis === targetMap.id_statis || item.id_channel === targetMap.id_channel)) {
+              return true;
+            }
+            const itemJudul = (item.judul || '').toLowerCase();
+            const itemChannel = (item.datachannel?.nama || '').toLowerCase();
+            const targetSlug = slug.toLowerCase().replace(/-/g, ' ');
+            return itemJudul.includes(targetSlug) || itemChannel.includes(targetSlug);
+          });
+        }
+
+        // 2. Fallback: Query specific id_statis endpoint if list match wasn't found
+        if (!matchedItem && targetMap) {
+          const resStatis = await apiFetch(`/statis/${targetMap.id_statis}`);
+          if (resStatis.success && resStatis.data) {
+            matchedItem = resStatis.data;
+          }
+        }
+
+        // 3. Secondary fallback: Query specific id_channel endpoint
+        if (!matchedItem && targetMap) {
+          const resChannel = await apiFetch(`/statis/${targetMap.id_channel}`);
+          if (resChannel.success && resChannel.data) {
+            matchedItem = resChannel.data;
+          }
         }
 
         if (isMounted) {
-          if (res.success && res.data) {
-            const item = res.data;
-            const rawContent = item.isi || item.content || item.keterangan || '';
-            // Clean bis_size and bis_skin_checked attributes from CKEditor (exact sinpo 2 logic)
+          if (matchedItem) {
+            const rawContent = matchedItem.isi || matchedItem.content || matchedItem.keterangan || '';
             const cleanContent = rawContent
               .replace(/\s*bis_size="[^"]*"/gi, '')
               .replace(/\s*bis_skin_checked="[^"]*"/gi, '');
 
             setData({
-              title: item.judul || item.title || STATIC_TITLE_MAP[slug]?.title || 'Informasi Statis',
+              title: matchedItem.judul || matchedItem.title || STATIC_TITLE_MAP[slug]?.title || 'Informasi Statis',
               content: cleanContent || STATIC_FALLBACKS[slug]?.content || '',
             });
           } else {
