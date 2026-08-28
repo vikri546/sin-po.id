@@ -20,7 +20,9 @@ interface ArticleDetailViewProps {
 }
 
 import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
-import { apiFetch } from '../lib/apiClient';
+import { apiFetch, isTakedownArticle } from '../lib/apiClient';
+import { parseAnyDate } from '../lib/dateFormatter';
+import NotFoundView from './NotFoundView';
 
 const calculateSpeechDuration = (title: string, author: string, content: string): number => {
   const text = `${title}. Ditulis oleh ${author}. ${stripHtml(content)}`;
@@ -124,41 +126,110 @@ export default function ArticleDetailView({
   const [isDragging, setIsDragging] = useState(false);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
+  const [fullContent, setFullContent] = useState<string>(article.content || article.summary || article.subtitle || '');
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Initialize duration dynamically based on word count whenever article changes
   useEffect(() => {
-    const seconds = calculateSpeechDuration(article.title, article.author, article.content);
+    const contentToUse = fullContent || article.content || article.summary || '';
+    const seconds = calculateSpeechDuration(article.title, article.author, contentToUse);
     setSpeechDuration(seconds);
     setSpeechProgress(0);
     setLiveViews(null);
-  }, [article]);
+  }, [article, fullContent]);
 
-  // Instant scroll to top when mounting a new article detail page
+  useEffect(() => {
+    setFullContent(article.content || article.summary || article.subtitle || '');
+  }, [article.id, article.content]);
+
+  // Article Not Found state (takedown / schedule / 404)
+  const [isArticleNotFound, setIsArticleNotFound] = useState(false);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper: extract view count from raw API data
+  const extractViewCount = (data: any): number => {
+    if (typeof data.counter === 'number') return data.counter;
+    if (typeof data.dilihat === 'number') return data.dilihat;
+    if (typeof data.views === 'number') return data.views;
+    return parseInt(data.counter || data.dilihat || data.views || '0', 10) || 0;
+  };
+
+  // Initial fetch + 30s real-time polling (matching sinpo 2 startArticlePolling)
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
+    setIsArticleNotFound(false);
+    let isMounted = true;
 
-    // Fetch fresh article detail and trigger view count on Laravel API backend
-    async function triggerArticleView() {
+    const rawId = article.id.replace('laravel-', '');
+    const targetIdOrSlug = (article as any).slug || rawId;
+
+    // Core fetch function — used for initial load and polling
+    async function fetchArticleDetail(isInitial: boolean = false) {
       try {
-        const rawId = article.id.replace('laravel-', '');
-        const targetIdOrSlug = (article as any).slug || rawId;
         const res = await apiFetch(`/berita/${targetIdOrSlug}`);
+        if (!isMounted) return;
+
         if (res && res.data) {
-          const count = typeof res.data.dilihat === 'number' 
-            ? res.data.dilihat 
-            : (typeof res.data.views === 'number' 
-                ? res.data.views 
-                : (parseInt(res.data.dilihat || res.data.views || '0', 10) || 0));
-          if (count > 0) {
-            setLiveViews(count);
+          const detailData = res.data as any;
+
+          // Check takedown / scheduled status from raw API data
+          if (isTakedownArticle(detailData)) {
+            setIsArticleNotFound(true);
+            return;
+          }
+
+          // 1. View counter — always take the highest value (matching sinpo 2 logic)
+          const fetchedCount = extractViewCount(detailData);
+          setLiveViews(prev => {
+            const currentMax = Math.max(prev ?? 0, article.views ?? 0, article.dilihat ?? 0);
+            return Math.max(currentMax, fetchedCount);
+          });
+
+          // 2. Content / Isi — live edit sync
+          const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
+          if (fetchedContent) {
+            setFullContent(fetchedContent);
+          }
+
+          // 3. Title — live edit sync (only on polling, not initial)
+          if (!isInitial && detailData.judul && detailData.judul !== article.title) {
+            // Update document title for SEO
+            document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
           }
         }
-      } catch (err) {
-        // Silent catch if offline
+      } catch (err: any) {
+        if (!isMounted) return;
+        // If API returns 404 — article takedown / deleted / rescheduled
+        if (err?.status === 404 || err?.isNotFound) {
+          setIsArticleNotFound(true);
+        }
       }
     }
-    triggerArticleView();
+
+    // Initial fetch (triggers view count increment on API backend)
+    fetchArticleDetail(true);
+
+    // 30-second real-time polling (matching sinpo 2 articlePollingInterval = 30000)
+    pollingRef.current = setInterval(() => {
+      fetchArticleDetail(false);
+    }, 30000);
+
+    // Tab visibility listener — immediate refetch when tab becomes visible
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible' && isMounted) {
+        fetchArticleDetail(false);
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [article.id, (article as any).slug]);
 
   // Handle ticking progress when TTS is active
@@ -294,6 +365,17 @@ export default function ArticleDetailView({
     onShare("Tautan artikel berhasil disalin ke papan klip!");
   };
 
+  // If article was detected as takedown / scheduled / deleted during polling
+  if (isArticleNotFound) {
+    return (
+      <NotFoundView
+        title="404 NOT FOUND"
+        message="Berita yang Anda cari tidak ditemukan, telah dihapus, atau belum dipublikasikan."
+        onGoHome={onBack}
+      />
+    );
+  }
+
   return (
     <article className="w-full flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
       
@@ -324,6 +406,13 @@ export default function ArticleDetailView({
         <h1 className="font-sans text-3xl md:text-5xl font-extrabold tracking-tight leading-tight text-slate-950 dark:text-white text-center md:text-left">
           {article.title}
         </h1>
+
+        {/* Subtitle / Ringkasan Deskripsi Teaser */}
+        {(article.subtitle || article.summary) && (
+          <p className="font-sans text-base md:text-lg text-slate-600 dark:text-slate-300 border-l-4 border-brand-red-600 pl-4 py-1.5 italic font-medium leading-relaxed">
+            {stripHtml(article.subtitle || article.summary)}
+          </p>
+        )}
 
         {/* Share Section (Bagikan: WA FB X IG IN) */}
         <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 -mt-2">
@@ -513,52 +602,89 @@ export default function ArticleDetailView({
                   ? "text-base"
                   : "text-lg md:text-xl"
             }`}
-            dangerouslySetInnerHTML={{ __html: formatArticleHtml(article.content) }}
+            dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || article.content || article.summary || article.subtitle || 'Isi artikel sedang dimuat...') }}
           />
 
           {/* Article Tags */}
           <div className="flex flex-wrap items-center gap-2 pt-4 border-b border-slate-100 dark:border-slate-900/40 pb-4">
             <span className="font-sans text-xs font-bold text-slate-600 dark:text-slate-400 mr-1">Tags:</span>
             {article.tags.map((tag) => (
-              <button
+              <a
                 key={tag}
-                onClick={() => {
+                href={`?tag=${encodeURIComponent(tag)}`}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
                   if (onSelectTag) {
                     onSelectTag(tag);
                   }
                 }}
-                className="font-sans text-[10px] font-bold text-slate-500 hover:text-brand-red-600 dark:text-slate-400 dark:hover:text-red-500 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800/80 px-2.5 py-1 rounded transition-all cursor-pointer active:scale-95"
+                className="font-sans text-[10px] font-bold text-slate-500 hover:text-brand-red-600 dark:text-slate-400 dark:hover:text-red-500 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800/80 px-2.5 py-1 rounded transition-all cursor-pointer active:scale-95 inline-block"
               >
                 #{tag}
-              </button>
+              </a>
             ))}
           </div>
 
 
         </div>
 
-        {/* BERITA TERKAIT Section */}
+        {/* BERITA TERKAIT Section (Tag-matched & Relevant articles, total 6 items) */}
         {(() => {
-          const relatedArticles = articles
-            ? articles
-                .filter((art) => art.id !== article.id && art.category.toUpperCase() === article.category.toUpperCase())
-                .slice(0, 6)
-            : [];
-          
-          // If we have less than 6 related articles, fill up with other articles
-          const fallbackRelated = [...relatedArticles];
-          if (articles && fallbackRelated.length < 6) {
-            const extra = articles.filter(
-              (art) => art.id !== article.id && art.category.toUpperCase() !== article.category.toUpperCase()
+          if (!articles || articles.length === 0) return null;
+
+          const currentTags = (article.tags || []).map((t) => t.toLowerCase().trim());
+
+          // 1. Find articles sharing at least one common tag with the current article
+          const tagMatchedArticles = articles.filter((art) => {
+            if (art.id === article.id) return false;
+            const artTags = (art.tags || []).map((t) => t.toLowerCase().trim());
+            return currentTags.some((tag) => artTags.includes(tag));
+          });
+
+          // Sort tag-matched articles newest first
+          tagMatchedArticles.sort(
+            (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
+          );
+
+          const finalRelated: Article[] = [...tagMatchedArticles];
+
+          // 2. If tag-matched articles are less than 6, fill up with same-category articles
+          if (finalRelated.length < 6) {
+            const categoryArticles = articles.filter((art) => {
+              if (art.id === article.id) return false;
+              if (finalRelated.some((r) => r.id === art.id)) return false;
+              return art.category.toUpperCase() === article.category.toUpperCase();
+            });
+
+            categoryArticles.sort(
+              (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
             );
-            for (const item of extra) {
-              if (fallbackRelated.length >= 6) break;
-              if (!fallbackRelated.some((r) => r.id === item.id)) {
-                fallbackRelated.push(item);
-              }
+
+            for (const catArt of categoryArticles) {
+              if (finalRelated.length >= 6) break;
+              finalRelated.push(catArt);
             }
           }
 
+          // 3. If still less than 6, fill up with remaining latest articles
+          if (finalRelated.length < 6) {
+            const fallbackArticles = articles.filter((art) => {
+              if (art.id === article.id) return false;
+              return !finalRelated.some((r) => r.id === art.id);
+            });
+
+            fallbackArticles.sort(
+              (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
+            );
+
+            for (const fbArt of fallbackArticles) {
+              if (finalRelated.length >= 6) break;
+              finalRelated.push(fbArt);
+            }
+          }
+
+          const fallbackRelated = finalRelated.slice(0, 6);
           if (fallbackRelated.length === 0) return null;
 
           return (
@@ -585,9 +711,14 @@ export default function ArticleDetailView({
                   const showImageContainer = isMobileImage || isDesktopImage;
 
                   return (
-                    <div
+                    <a
                       key={related.id}
-                      onClick={() => onSelectArticle?.(related)}
+                      href={`?article=${encodeURIComponent(related.slug || related.id)}`}
+                      onClick={(e) => {
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                        e.preventDefault();
+                        onSelectArticle?.(related);
+                      }}
                       className="group flex gap-3.5 py-3.5 bg-transparent border-b border-slate-100 dark:border-slate-900 rounded-none cursor-pointer transition-all text-left"
                     >
                       {showImageContainer && related.imageUrl && (
@@ -616,7 +747,7 @@ export default function ArticleDetailView({
                           </span>
                         </div>
                       </div>
-                    </div>
+                    </a>
                   );
                 })}
               </div>
@@ -624,10 +755,15 @@ export default function ArticleDetailView({
           );
         })()}
 
-        {/* BERITA TERKINI Section */}
+        {/* BERITA TERKINI Section (Strictly newest to oldest across mixed categories, total 7 items) */}
         {(() => {
           const latestArticles = articles
-            ? articles.filter((art) => art.id !== article.id).slice(0, 7)
+            ? [...articles]
+                .filter((art) => art.id !== article.id)
+                .sort(
+                  (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
+                )
+                .slice(0, 7)
             : [];
           if (latestArticles.length === 0) return null;
           return (
@@ -639,10 +775,15 @@ export default function ArticleDetailView({
               </div>
               <div className="flex flex-col">
                 {latestArticles.map((latest) => (
-                  <article
+                  <a
                     key={latest.id}
                     id={`article-detail-latest-card-${latest.id}`}
-                    onClick={() => onSelectArticle?.(latest)}
+                    href={`?article=${encodeURIComponent(latest.slug || latest.id)}`}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onSelectArticle?.(latest);
+                    }}
                     className="group flex flex-row gap-4 py-4 border-b border-slate-100 dark:border-slate-900/40 cursor-pointer bg-transparent last:border-b-0"
                   >
                     {/* Left Side: Image */}
@@ -678,7 +819,7 @@ export default function ArticleDetailView({
                         </span>
                       </div>
                     </div>
-                  </article>
+                  </a>
                 ))}
               </div>
             </div>

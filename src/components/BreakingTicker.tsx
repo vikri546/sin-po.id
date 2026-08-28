@@ -125,13 +125,19 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
     <div id="breaking-news-bar" className="bg-slate-900 text-white text-xs border-b border-slate-800 flex items-center h-10 px-4 md:px-8 justify-between select-none">
       {/* Left Label & Running Marquee */}
       <div className="flex items-center gap-3 overflow-hidden flex-1 mr-1 md:mr-2">
-        <span className="bg-brand-red-600 px-2.5 py-1 text-[10px] font-bold font-sans tracking-wider flex items-center gap-1.5 shrink-0 uppercase rounded-sm">
+        <a
+          href="https://youtube.com/@sinpotv?si=hiaKrjanN5Zh1GFe"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-brand-red-600 hover:bg-brand-red-700 transition-colors px-2.5 py-1 text-[10px] font-bold font-sans tracking-wider flex items-center gap-1.5 shrink-0 uppercase rounded-sm text-white cursor-pointer"
+          title="SIN PO TV (Buka di Tab Baru)"
+        >
           <span className="relative flex h-2 w-2 mr-1">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
           </span>
           SIN PO TV
-        </span>
+        </a>
         
         {/* Hardware-accelerated CSS marquee with hover pause */}
         <div className="w-full overflow-hidden text-slate-300 font-sans tracking-wide relative flex items-center">
@@ -146,29 +152,45 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
           >
             {/* Track 1 */}
             <div className="flex shrink-0">
-              {newsItems.map((item, idx) => (
-                <span 
-                  key={`t1-${idx}`} 
-                  onClick={() => handleItemClick(item)}
-                  className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer"
-                  title={item.article ? `Baca: ${item.article.title}` : undefined}
-                >
-                  • {item.text}
-                </span>
-              ))}
+              {newsItems.map((item, idx) => {
+                const url = item.article ? `?article=${encodeURIComponent(item.article.slug || item.article.id)}` : '#';
+                return (
+                  <a
+                    key={`t1-${idx}`}
+                    href={url}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      handleItemClick(item);
+                    }}
+                    className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer text-white no-underline"
+                    title={item.article ? `Baca: ${item.article.title}` : undefined}
+                  >
+                    • {item.text}
+                  </a>
+                );
+              })}
             </div>
             {/* Track 2 (seamless clone) */}
             <div className="flex shrink-0">
-              {newsItems.map((item, idx) => (
-                <span 
-                  key={`t2-${idx}`} 
-                  onClick={() => handleItemClick(item)}
-                  className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer"
-                  title={item.article ? `Baca: ${item.article.title}` : undefined}
-                >
-                  • {item.text}
-                </span>
-              ))}
+              {newsItems.map((item, idx) => {
+                const url = item.article ? `?article=${encodeURIComponent(item.article.slug || item.article.id)}` : '#';
+                return (
+                  <a
+                    key={`t2-${idx}`}
+                    href={url}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      handleItemClick(item);
+                    }}
+                    className="mx-8 hover:text-brand-gold transition-colors font-medium shrink-0 cursor-pointer text-white no-underline"
+                    title={item.article ? `Baca: ${item.article.title}` : undefined}
+                  >
+                    • {item.text}
+                  </a>
+                );
+              })}
             </div>
           </div>
 

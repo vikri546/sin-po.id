@@ -92,9 +92,14 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
           <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
             {hukumArticles.length > 0 ? (
               hukumArticles.map((article) => (
-                <article
+                <a
                   key={`hukum-${article.id}`}
-                  onClick={() => onSelectArticle(article)}
+                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelectArticle(article);
+                  }}
                   className="group flex flex-row gap-4 py-4 cursor-pointer bg-transparent"
                 >
                   {/* Image Left */}
@@ -123,7 +128,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
                       </span>
                     </div>
                   </div>
-                </article>
+                </a>
               ))
             ) : (
               <p className="text-sm font-sans text-slate-400 dark:text-slate-500 py-4 italic">
@@ -144,9 +149,14 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
           <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-800">
             {politikArticles.length > 0 ? (
               politikArticles.map((article) => (
-                <article
+                <a
                   key={`politik-${article.id}`}
-                  onClick={() => onSelectArticle(article)}
+                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelectArticle(article);
+                  }}
                   className="group flex flex-row gap-4 py-4 cursor-pointer bg-transparent"
                 >
                   {/* Image Left */}
@@ -175,7 +185,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
                       </span>
                     </div>
                   </div>
-                </article>
+                </a>
               ))
             ) : (
               <p className="text-sm font-sans text-slate-400 dark:text-slate-500 py-4 italic">

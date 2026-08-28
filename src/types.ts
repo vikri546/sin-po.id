@@ -15,6 +15,7 @@ export interface Article {
   category: string; // POLITIK, PERISTIWA, HUKUM, EKBIS, BONGKAR
   imageUrl: string;
   date: string;
+  publishedAtMs?: number; // Exact timestamp in milliseconds for 100% accurate chronological sorting
   author: string;
   readTime: string;
   tags: string[];

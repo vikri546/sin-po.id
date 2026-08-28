@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Loader2 } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
+import { stripHtml } from '../lib/htmlRenderer';
+import { parseAnyDate } from '../lib/dateFormatter';
 
 interface CategoryPageViewProps {
   category: string;
@@ -8,14 +11,73 @@ interface CategoryPageViewProps {
   allCategoryArticles?: Article[];
   onSelectArticle: (article: Article) => void;
   isLoading?: boolean;
+  onLoadMoreRemote?: () => Promise<void>;
+  hasMoreRemote?: boolean;
 }
 
-export default function CategoryPageView({ category, articles, allCategoryArticles, onSelectArticle, isLoading = false }: CategoryPageViewProps) {
-  if (isLoading) {
+export default function CategoryPageView({ 
+  category, 
+  articles, 
+  allCategoryArticles, 
+  onSelectArticle, 
+  isLoading = false,
+  onLoadMoreRemote,
+  hasMoreRemote = true
+}: CategoryPageViewProps) {
+  const [visibleCount, setVisibleCount] = useState<number>(10);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
+  // Reset count whenever category prop changes
+  useEffect(() => {
+    setVisibleCount(10);
+    setIsLoadingMore(false);
+  }, [category]);
+
+  // Sort articles strictly newest to oldest using high-precision publishedAtMs
+  const sortedArticles = useMemo(() => {
+    if (!articles || articles.length === 0) return [];
+    return [...articles].sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+  }, [articles]);
+
+  const finalAllArticles = useMemo(() => {
+    const pool = allCategoryArticles || articles;
+    if (!pool || pool.length === 0) return [];
+    return [...pool].sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+  }, [allCategoryArticles, articles]);
+
+  // Display category articles strictly newest first:
+  // Column 1: Featured Image (#1 in body = Article #6 overall)
+  const col1Article = sortedArticles[0] || null;
+  
+  // Column 2: List (#2 to #5 in body = Articles #7 to #10 overall)
+  const col2Articles = sortedArticles.length > 1 
+    ? sortedArticles.slice(1, 5) 
+    : [];
+
+  // Track article IDs rendered in the top 3-column section
+  const topSectionArticleIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (col1Article) ids.add(col1Article.id);
+    col2Articles.forEach((art) => ids.add(art.id));
+    return ids;
+  }, [col1Article, col2Articles]);
+
+  // Get maximum 5 latest articles of the category for the "Berita Terkini" sidebar ("tetapkan berita terkini")
+  const latestNews = finalAllArticles.slice(0, 5);
+
+  // Exclude top 3-column section articles so they NEVER repeat in "Berita Lainnya"
+  const beritaLainnyaPool = useMemo(() => {
+    return sortedArticles.filter((art) => !topSectionArticleIds.has(art.id));
+  }, [sortedArticles, topSectionArticleIds]);
+
+  // Paginated "Berita Lainnya" list (sliced to visibleCount)
+  const displayedBeritaLainnya = beritaLainnyaPool.slice(0, visibleCount);
+
+  if (isLoading || !articles || articles.length === 0) {
     return (
       <div className="w-full mt-2 animate-fade-in flex flex-col gap-8">
-        {/* Top 3-Column Grid (hidden on mobile) */}
-        <div className="hidden md:grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+        {/* Top 3-Column Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
           {/* Column 1: Featured Image + Author/Date + Title */}
           <div className="flex flex-col gap-3">
             <div className="relative w-full h-[280px] sm:h-[320px] overflow-hidden rounded-[5px]">
@@ -100,45 +162,50 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
       </div>
     );
   }
-  if (articles.length === 0) {
-    return (
-      <div className="py-12 text-center bg-white dark:bg-slate-950 rounded-[8px] border border-slate-200 dark:border-slate-800">
-        <p className="font-sans text-xs md:text-sm text-slate-500 dark:text-slate-400">
-          Belum ada berita tambahan tersedia di kategori ini.
-        </p>
-      </div>
-    );
-  }
 
-  // Smart selection logic with robust fallbacks:
-  // articles[0..3] are already used in the hero overlay (idx 2, 3, 4, 5 of category articles)
-  // Therefore, we try to use articles[4] for Column 1 and articles[5..8] for Column 2.
-  // If we don't have enough articles, we fallback gracefully.
-  const col1Article = articles[4] || articles[0] || null;
-  
-  const col2Articles = articles.length > 5 
-    ? articles.slice(5, 9) 
-    : articles.filter(art => !col1Article || art.id !== col1Article.id).slice(0, 4);
+  const handleLoadMore = async () => {
+    setIsLoadingMore(true);
 
-  // Fallback to articles if allCategoryArticles is not provided
-  const finalAllArticles = allCategoryArticles || articles;
-  // Get maximum 5 latest articles of the category for the "Berita Terkini" sidebar
-  const latestNews = finalAllArticles.slice(0, 5);
+    // If local pool already has unshown articles, reveal them immediately!
+    if (visibleCount < beritaLainnyaPool.length) {
+      const newVisible = visibleCount + 10;
+      setVisibleCount(newVisible);
+      setIsLoadingMore(false);
 
-  // Remaining articles for "Berita Lainnya" (other than Column 1 and Column 2 articles)
-  const col1Id = col1Article?.id;
-  const col2Ids = col2Articles.map(art => art.id);
-  const remainingArticles = articles.filter(art => art.id !== col1Id && !col2Ids.includes(art.id));
+      // If running low on local pool articles, prefetch remote items in background (fire & forget)
+      if (newVisible + 5 >= beritaLainnyaPool.length && onLoadMoreRemote && hasMoreRemote !== false) {
+        onLoadMoreRemote().catch(() => {});
+      }
+      return;
+    }
+
+    // Otherwise, fetch remote page
+    if (onLoadMoreRemote && hasMoreRemote !== false) {
+      try {
+        await onLoadMoreRemote();
+      } catch (err) {
+        console.log('Remote category load notice:', err);
+      }
+    }
+
+    setVisibleCount(prev => prev + 10);
+    setIsLoadingMore(false);
+  };
 
   return (
     <div className="w-full mt-2 animate-fade-in">
-      <div className="hidden md:grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
         
         {/* COLUMN 1: Portrait Featured News (aligned height with column 2 list, no zoom, no shadow) */}
         <div className="flex flex-col gap-4">
           {col1Article && (
-            <div 
-              onClick={() => onSelectArticle(col1Article)}
+            <a 
+              href={`?article=${encodeURIComponent(col1Article.slug || col1Article.id)}`}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onSelectArticle(col1Article);
+              }}
               className="flex flex-col gap-3 group cursor-pointer h-full justify-between"
             >
               <div className="relative w-full h-[280px] sm:h-[320px] md:h-[280px] lg:h-[320px] xl:h-[340px] overflow-hidden rounded-[5px] bg-slate-100 dark:bg-slate-900">
@@ -146,6 +213,7 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                   src={col1Article.imageUrl} 
                   alt={col1Article.title} 
                   referrerPolicy="no-referrer"
+                  onError={(e) => { e.currentTarget.src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media'; }}
                   className="h-full w-full object-cover rounded-[5px]" 
                 />
               </div>
@@ -157,8 +225,11 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                 <h4 className="font-sans text-sm md:text-base lg:text-lg font-bold text-slate-900 dark:text-white leading-snug group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors">
                   {col1Article.title}
                 </h4>
+                <p className="font-sans text-xs md:text-sm text-slate-600 dark:text-slate-400 line-clamp-2 leading-relaxed mt-0.5">
+                  {stripHtml(col1Article.summary || col1Article.subtitle || col1Article.content) || `Simak ulasan lengkap dan kabar berita terkini mengenai ${col1Article.title} selengkapnya di SinPo.id.`}
+                </p>
               </div>
-            </div>
+            </a>
           )}
         </div>
 
@@ -169,9 +240,14 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
               <p className="text-xs text-slate-400 font-sans italic">Tidak ada rekomendasi tambahan.</p>
             ) : (
               col2Articles.map((art) => (
-                <div 
+                <a 
                   key={art.id} 
-                  onClick={() => onSelectArticle(art)} 
+                  href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelectArticle(art);
+                  }}
                   className="flex items-start gap-3 cursor-pointer group pb-3.5 border-b border-slate-100 dark:border-slate-800/40 last:border-0 last:pb-0"
                 >
                   <div className="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 overflow-hidden rounded-[5px] bg-slate-100 dark:bg-slate-900">
@@ -179,6 +255,7 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                       src={art.imageUrl} 
                       alt={art.title} 
                       referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.src = 'https://placehold.co/400x300/1e293b/ffffff?text=SinPo'; }}
                       className="h-full w-full object-cover rounded-[5px]" 
                     />
                   </div>
@@ -196,7 +273,7 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                       </span>
                     </div>
                   </div>
-                </div>
+                </a>
               ))
             )}
           </div>
@@ -216,17 +293,22 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
       {/* Horizontal Divider */}
       {finalAllArticles.length > 0 && (
         <>
-          <div className="hidden md:block w-full border-t border-slate-200/60 dark:border-slate-800/40 my-8" />
+          <div className="w-full border-t border-slate-200/60 dark:border-slate-800/40 my-8" />
           
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
             
             {/* COLUMN 1: Berita Lainnya List (lg:col-span-2) */}
             <div className="lg:col-span-2 flex flex-col gap-4">
               <div className="flex flex-col gap-1">
-                {finalAllArticles.map((art) => (
-                  <article
+                {displayedBeritaLainnya.map((art) => (
+                  <a
                     key={art.id}
-                    onClick={() => onSelectArticle(art)}
+                    href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onSelectArticle(art);
+                    }}
                     className="group flex gap-4 py-4 border-b border-slate-100 dark:border-slate-800/40 last:border-0 cursor-pointer text-left items-center"
                   >
                     {/* Thumbnail Image */}
@@ -235,6 +317,7 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                         src={art.imageUrl}
                         alt={art.title}
                         referrerPolicy="no-referrer"
+                        onError={(e) => { e.currentTarget.src = 'https://placehold.co/400x300/1e293b/ffffff?text=SinPo'; }}
                         className="h-full w-full object-cover rounded-[5px]"
                       />
                     </div>
@@ -254,8 +337,33 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                         </span>
                       </div>
                     </div>
-                  </article>
+                  </a>
                 ))}
+              </div>
+
+              {/* LIHAT LEBIH BANYAK Button */}
+              <div className="mt-6 flex justify-center pb-8">
+                {visibleCount < beritaLainnyaPool.length || hasMoreRemote !== false ? (
+                  isLoadingMore ? (
+                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-sans text-xs font-bold uppercase tracking-wider py-2">
+                      <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-red-600 dark:text-red-500" />
+                      <span>Memuat berita...</span>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={handleLoadMore}
+                      className="px-6 py-2.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-white hover:bg-brand-red-600 dark:hover:bg-red-600 hover:border-brand-red-600 dark:hover:border-red-600 rounded-[5px] text-xs font-sans font-black uppercase tracking-wider transition-all duration-200 cursor-pointer active:scale-95 shadow-sm"
+                    >
+                      Lihat Lebih Banyak
+                    </button>
+                  )
+                ) : (
+                  finalAllArticles.length > 0 && (
+                    <p className="text-[11px] font-sans font-medium text-slate-400 dark:text-slate-500 py-2 italic">
+                      Telah menampilkan seluruh berita kategori ini.
+                    </p>
+                  )
+                )}
               </div>
             </div>
 
@@ -270,9 +378,14 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
               
               <div className="flex flex-col gap-1">
                 {latestNews.map((art) => (
-                  <article
+                  <a
                     key={art.id}
-                    onClick={() => onSelectArticle(art)}
+                    href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onSelectArticle(art);
+                    }}
                     className="group flex flex-col py-3.5 border-b border-slate-100 dark:border-slate-900/40 last:border-0 cursor-pointer text-left"
                   >
                     <span className="font-sans text-[9px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider leading-none">
@@ -281,10 +394,10 @@ export default function CategoryPageView({ category, articles, allCategoryArticl
                     <h4 className="font-sans text-xs sm:text-[13px] font-bold text-slate-900 dark:text-white leading-snug group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors mt-2 mb-1.5 line-clamp-3">
                       {art.title}
                     </h4>
-                    <span className="font-sans text-[9px] text-slate-500 dark:text-slate-400 leading-none">
+                    <span className="font-sans text-[9px] text-slate-400 dark:text-slate-500 font-normal leading-none">
                       {art.date}
                     </span>
-                  </article>
+                  </a>
                 ))}
               </div>
             </div>

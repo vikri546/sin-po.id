@@ -269,7 +269,7 @@ export default function ArticleModal({
                       ? "text-base"
                       : "text-lg md:text-xl"
                 }`}
-                dangerouslySetInnerHTML={{ __html: formatArticleHtml(article.content) }}
+                dangerouslySetInnerHTML={{ __html: formatArticleHtml(article.content || article.summary || article.subtitle || '') }}
               />
 
               {/* Article Tags */}

@@ -16,13 +16,49 @@ import Skeleton from './components/skeletons/Skeleton';
 import Toast from './components/Toast';
 import Logo from './components/Logo';
 import { Article, Comment } from './types';
-import { apiFetch, transformLaravelPostToArticle } from './lib/apiClient';
+import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './lib/apiClient';
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
-import StaticPageModal from './components/StaticPageModal';
+import StaticPageView from './components/StaticPageView';
 
+// Resolve the correct channel ID from the channels list for API queries (matching sinpo 2 reference)
+function resolveChannelId(categoryName: string, channels: any[]): number | null {
+  const cat = categoryName.toUpperCase().trim();
+  if (cat === 'BONGKAR') return 21;
+  if (cat === 'BUDAYA') return 22;
+  if (cat === 'PENDIDIKAN') return 23;
+  if (cat === 'SIN PO DULU' || cat === 'SINPO DULU') return 24;
+  if (cat === 'OLAHRAGA') return 25;
+  if (cat === 'KESEHATAN') return 26;
+  if (cat === 'SIN PO TV' || cat === 'SINPO TV' || cat === 'POJOK SINPO') return 27;
 
+  if (!channels || channels.length === 0) return null;
+  const search = categoryName.toLowerCase().trim();
+  const found = channels.find((c: any) =>
+    (c.slug && c.slug.toLowerCase() === search) ||
+    (c.nama && c.nama.toLowerCase() === search) ||
+    (c.name && c.name.toLowerCase() === search)
+  );
+  return found ? found.id : null;
+}
 
+// Build the API endpoint for category news using channel parameter (like sinpo 2 reference)
+function getCategoryEndpoint(categoryName: string, page: number, channelId: number | null): string {
+  if (channelId) {
+    return `/berita?channel=${channelId}&page=${page}&limit=20&sort=desc`;
+  }
+  const catQuery = categoryName.toLowerCase().trim();
+  return `/berita?channel=${encodeURIComponent(catQuery)}&page=${page}&limit=20&sort=desc`;
+}
+
+// Filter helper to exclude legacy 2022 fallback articles with broken dummy images (e.g. Pembalap MotoGP, Lahan Sawit)
+function isBrokenLegacyArticle(art: Article): boolean {
+  if (!art || !art.title) return true;
+  if (art.category === 'Umum' && (art.date.includes('2022') || art.title.includes('MotoGP') || art.title.includes('Sawit') || art.title.includes('Batsirai') || art.title.includes('IKN'))) {
+    return true;
+  }
+  return false;
+}
 
 const highlightText = (text: string, query: string) => {
   if (!query.trim()) return <span>{text}</span>;
@@ -75,45 +111,100 @@ export default function App() {
 
   // Live State from Laravel REST API
   const [articlesState, setArticlesState] = useState<Article[]>([]);
+  const [masterLiveArticles, setMasterLiveArticles] = useState<Article[]>([]);
   const [breakingNewsList, setBreakingNewsList] = useState<string[]>([]);
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [popularNewsList, setPopularNewsList] = useState<Article[]>([]);
   const [staticModalSlug, setStaticModalSlug] = useState<string | null>(null);
 
-  // Fetch all live data exclusively from Laravel REST API
-  useEffect(() => {
-    async function fetchAllLiveData() {
-      // 1. Fetch main news & headline
-      try {
-        const response = await apiFetch('/berita');
-        if (response.success && Array.isArray(response.data)) {
-          const liveArticles = response.data.map(transformLaravelPostToArticle);
-          setArticlesState(liveArticles);
-        }
-      } catch (err) {
-        console.log('Laravel REST API /berita: offline');
-        setArticlesState([]);
-      }
+  // Channel list from API for dynamic category resolution (like sinpo 2 reference)
+  const [channelsList, setChannelsList] = useState<any[]>([]);
 
-      // 1b. Fetch headline news specifically
-      try {
-        const headlineRes = await apiFetch('/headline');
-        if (headlineRes.success && headlineRes.data) {
-          const rawHeadline = Array.isArray(headlineRes.data) ? headlineRes.data[0] : headlineRes.data;
-          if (rawHeadline) {
-            const headlineArticle = transformLaravelPostToArticle(rawHeadline);
-            headlineArticle.isHero = true;
-            setArticlesState(prev => {
-              const filtered = prev.filter(a => a.id !== headlineArticle.id);
-              return [headlineArticle, ...filtered];
-            });
+  // Dedicated category articles pool - accumulates paginated results for the active category
+  const [categoryArticlesPool, setCategoryArticlesPool] = useState<Article[]>([]);
+  const categorySeenIdsRef = useRef<Set<string>>(new Set());
+
+  // Loading & Skeleton State (automatic initial load, reload & navigation transition)
+  const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
+  const loadingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const loadingStartTimeRef = useRef<number>(Date.now());
+
+  const triggerLoading = useCallback((minDurationMs: number = 500) => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+    }
+    loadingStartTimeRef.current = Date.now();
+    setIsLoadingContent(true);
+  }, []);
+
+  const finishLoading = useCallback((minDurationMs: number = 500) => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+    }
+    const elapsed = Date.now() - loadingStartTimeRef.current;
+    const remaining = Math.max(0, minDurationMs - elapsed);
+
+    loadingTimerRef.current = setTimeout(() => {
+      setIsLoadingContent(false);
+    }, remaining);
+  }, []);
+
+  const masterLiveArticlesRef = useRef<Article[]>([]);
+
+  // Real-Time Live News Fetcher & Auto Polling
+  const fetchLiveData = useCallback(async () => {
+    try {
+      const response = await apiFetch('/berita?limit=100');
+      if (response.success && Array.isArray(response.data)) {
+        // Filter out takedown/scheduled articles from raw API data (matching sinpo 2 isTakedownArticle filter)
+        const cleanRawData = response.data.filter((item: any) => item && !isTakedownArticle(item));
+        const liveArticles = cleanRawData.map(transformLaravelPostToArticle);
+        
+        // Filter out valid articles
+        const validArticles = liveArticles.filter(a => a && a.id);
+
+        if (validArticles.length > 0) {
+          // Sort strictly newest first by date timestamp
+          validArticles.sort((a, b) => {
+            const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+            const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+            return timeB - timeA;
+          });
+
+          // Set first (newest) article as Hero
+          validArticles[0].isHero = true;
+
+          // Save to master live pool cache
+          masterLiveArticlesRef.current = validArticles;
+          setMasterLiveArticles(validArticles);
+
+          // If currently on SEMUA homepage, update active articlesState directly
+          if (!selectedCategory || selectedCategory === 'SEMUA') {
+            setArticlesState(validArticles);
           }
-        }
-      } catch (err) {
-        console.log('Laravel REST API /headline: offline');
-      }
 
-      // 2. Fetch categories
+          // Update Breaking Ticker from top 5 newest items
+          const recentTicker = liveArticles.slice(0, 5).map(a => `${a.category}: ${a.title}`);
+          setBreakingNewsList(recentTicker);
+
+          // Derive Popular News from highest viewed recent articles
+          const sortedByPopularity = [...liveArticles].sort((a, b) => (b.views || 0) - (a.views || 0));
+          setPopularNewsList(sortedByPopularity.slice(0, 5));
+        }
+      }
+    } catch (err) {
+      console.log('SinPo Live REST API /berita notice:', err);
+    }
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    // Initial fetch
+    fetchLiveData().then(() => {
+      finishLoading(500);
+    });
+
+    // Fetch categories
+    async function fetchCategories() {
       try {
         const catRes = await apiFetch('/kategori');
         if (catRes.success && Array.isArray(catRes.data)) {
@@ -121,64 +212,167 @@ export default function App() {
           setCategoriesList(['SEMUA', ...catNames]);
         }
       } catch (err) {
-        console.log('Laravel REST API /kategori: offline');
+        console.log('SinPo REST API /kategori notice:', err);
       }
+    }
+    fetchCategories();
 
-      // 3. Fetch popular news for sidebar & breaking news ticker (max 5)
+    // Fetch channels list for dynamic channel ID resolution (like sinpo 2 reference)
+    async function fetchChannels() {
       try {
-        const popRes = await apiFetch('/populer?limit=5');
-        if (popRes.success && Array.isArray(popRes.data)) {
-          const popArticles = popRes.data.map(transformLaravelPostToArticle).slice(0, 5);
-          setPopularNewsList(popArticles);
+        const chanRes = await apiFetch('/channel?limit=100');
+        if (chanRes.success && Array.isArray(chanRes.data)) {
+          setChannelsList(chanRes.data);
+        }
+      } catch (err) {
+        console.log('SinPo REST API /channel notice:', err);
+      }
+    }
+    fetchChannels();
+
+    // Setup 30-second real-time auto polling to fetch newest news continuously (silent background update)
+    const interval = setInterval(() => {
+      fetchLiveData();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [fetchLiveData, finishLoading]);
+
+  // Category pagination state for continuous historical loading (exact algorithm from sinpo 2)
+  const categoryPageRef = useRef<number>(1);
+  const [hasMoreCategoryNews, setHasMoreCategoryNews] = useState<boolean>(true);
+  const isFetchingCategoryRef = useRef<boolean>(false);
+
+  // Navigation nonce counter to force main page useEffect re-execution on re-clicks & return navigation
+  const [navNonce, setNavNonce] = useState<number>(0);
+
+  // Refetch / Synchronize news from SinPo API whenever category, search query, or tag changes
+  useEffect(() => {
+    let isMounted = true;
+    categoryPageRef.current = 1;
+    setHasMoreCategoryNews(true);
+    isFetchingCategoryRef.current = false;
+
+    // Trigger smooth loading skeleton for any page entrance/change
+    triggerLoading(500);
+
+    // Reset category pool and seen IDs when switching categories
+    setCategoryArticlesPool([]);
+    categorySeenIdsRef.current = new Set();
+
+    // A. HOMEPAGE ("SEMUA") without search or tag: Instant restore from masterLiveArticles
+    if ((!selectedCategory || selectedCategory === 'SEMUA') && !submittedSearchQuery && !selectedTag) {
+      const liveList = masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : masterLiveArticles;
+      if (liveList.length > 0) {
+        setArticlesState(liveList);
+        if (isMounted) finishLoading(500);
+      } else {
+        fetchLiveData().then(() => {
+          if (isMounted) finishLoading(500);
+        });
+      }
+      return;
+    }
+
+    async function fetchFilteredNews() {
+      try {
+        if (selectedCategory && selectedCategory !== 'SEMUA' && selectedCategory !== 'INDEKS' && !submittedSearchQuery && !selectedTag) {
+          // B. CATEGORY FILTER: Use channel parameter (like sinpo 2 reference)
+          const channelId = resolveChannelId(selectedCategory, channelsList);
+          const endpoint = getCategoryEndpoint(selectedCategory, 1, channelId);
           
-          const popularTickerItems = popArticles.map(a => `${a.category}: ${a.title}`);
-          if (popularTickerItems.length > 0) {
-            setBreakingNewsList(popularTickerItems);
+          let categoryArticles: Article[] = [];
+
+          try {
+            const catRes = await apiFetch(endpoint);
+            if (catRes.success && Array.isArray(catRes.data)) {
+              categoryArticles = catRes.data
+                .filter((item: any) => item && !isTakedownArticle(item))
+                .map((item: any) => {
+                  const art = transformLaravelPostToArticle(item);
+                  if (selectedCategory && selectedCategory !== 'SEMUA') {
+                    art.category = selectedCategory.toUpperCase().trim();
+                  }
+                  return art;
+                })
+                .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
+            }
+          } catch (err) {
+            console.log('Category API fetch notice:', err);
+          }
+
+          // Sort strictly newest first to oldest by timestamp
+          categoryArticles.sort((a, b) => {
+            const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+            const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+            return timeB - timeA;
+          });
+
+          if (categoryArticles.length > 0) {
+            categoryArticles[0].isHero = true;
+          }
+
+          if (isMounted) {
+            // Register seen IDs
+            categorySeenIdsRef.current = new Set(categoryArticles.map(a => a.id));
+            // Set pagination to page 2 for next load-more
+            categoryPageRef.current = 2;
+            // Check if there might be more pages
+            setHasMoreCategoryNews(categoryArticles.length >= 20);
+            // Store in dedicated category pool
+            setCategoryArticlesPool(categoryArticles);
+            setArticlesState(categoryArticles);
+          }
+        } else if (selectedCategory === 'INDEKS' && !submittedSearchQuery && !selectedTag) {
+          if (isMounted) {
+            const liveList = masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : masterLiveArticles;
+            setArticlesState(liveList);
+          }
+        } else {
+          // C. SEARCH QUERY OR TAG QUERY
+          let endpoint = '/berita';
+          const params = new URLSearchParams();
+
+          if (submittedSearchQuery && submittedSearchQuery.trim()) {
+            params.append('q', submittedSearchQuery.trim());
+          }
+
+          if (selectedTag && selectedTag.trim()) {
+            params.append('tag', selectedTag.trim());
+          }
+
+          params.append('limit', '50');
+
+          const queryString = params.toString();
+          if (queryString) {
+            endpoint += `?${queryString}`;
+          }
+
+          const res = await apiFetch(endpoint);
+          if (isMounted && res.success && Array.isArray(res.data)) {
+            const articles = res.data
+              .filter((item: any) => item && !isTakedownArticle(item))
+              .map(transformLaravelPostToArticle)
+              .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
+            
+            articles.sort((a, b) => {
+              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+              return timeB - timeA;
+            });
+
+            if (articles.length > 0) {
+              articles[0].isHero = true;
+            }
+            setArticlesState(articles);
           }
         }
       } catch (err) {
-        console.log('Laravel REST API /populer: offline');
-      }
-    }
-    fetchAllLiveData();
-  }, []);
-
-  // Refetch news from Laravel API whenever category, search query, or tag changes
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchFilteredNews() {
-      try {
-        let endpoint = '/berita';
-        const params = new URLSearchParams();
-
-        if (submittedSearchQuery && submittedSearchQuery.trim()) {
-          params.append('q', submittedSearchQuery.trim());
-        }
-
-        if (selectedCategory && selectedCategory !== 'SEMUA' && selectedCategory !== 'INDEKS') {
-          let catQuery = selectedCategory.toLowerCase();
-          if (catQuery === 'ekonomi & bisnis') catQuery = 'ekbis';
-          params.append('kategori', catQuery);
-        }
-
-        if (selectedTag && selectedTag.trim()) {
-          params.append('tag', selectedTag.trim());
-        }
-
-        params.append('limit', '20');
-
-        const queryString = params.toString();
-        if (queryString) {
-          endpoint += `?${queryString}`;
-        }
-
-        const res = await apiFetch(endpoint);
-        if (isMounted && res.success && Array.isArray(res.data)) {
-          const articles = res.data.map(transformLaravelPostToArticle);
-          setArticlesState(articles);
-        }
-      } catch (err) {
         console.log('Filtered news API fetch notice:', err);
+      } finally {
+        if (isMounted) {
+          finishLoading(500);
+        }
       }
     }
 
@@ -187,53 +381,347 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [submittedSearchQuery, selectedCategory, selectedTag]);
+  }, [submittedSearchQuery, selectedCategory, selectedTag, channelsList, navNonce]);
 
-  // Loading & Skeleton State (automatic initial load, reload & navigation transition)
-  const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
-  const loadingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Load next page of category historical articles from backend API (exact sinpo 2 algorithm)
+  const handleLoadMoreCategoryArticles = useCallback(async (attempts: number = 0) => {
+    if (!selectedCategory || selectedCategory === 'SEMUA' || !hasMoreCategoryNews) return;
+    if (isFetchingCategoryRef.current && attempts === 0) return;
+    if (attempts >= 2) return; // Prevent slow repetitive network loops
+    
+    isFetchingCategoryRef.current = true;
+    const fetchLimit = 20;
+    const currentPage = categoryPageRef.current;
 
-  const triggerLoading = useCallback((durationMs: number = 600) => {
-    if (loadingTimerRef.current) {
-      clearTimeout(loadingTimerRef.current);
+    try {
+      const channelId = resolveChannelId(selectedCategory, channelsList);
+      const endpoint = getCategoryEndpoint(selectedCategory, currentPage, channelId);
+      const res = await apiFetch(endpoint);
+
+      // Advance page counter for next call
+      categoryPageRef.current = currentPage + 1;
+
+      if (res.success && Array.isArray(res.data)) {
+        const rawItems = res.data.filter((item: any) => item && !isTakedownArticle(item));
+
+        if (rawItems.length === 0) {
+          setHasMoreCategoryNews(false);
+          return;
+        }
+
+        const transformed = rawItems
+          .map((item: any) => {
+            const art = transformLaravelPostToArticle(item);
+            if (selectedCategory && selectedCategory !== 'SEMUA') {
+              art.category = selectedCategory.toUpperCase().trim();
+            }
+            return art;
+          })
+          .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
+
+        // Filter out already-seen articles (like sinpo 2's filterSeenNews)
+        const newItems = transformed.filter((a: Article) => !categorySeenIdsRef.current.has(a.id));
+
+        if (newItems.length > 0) {
+          // Register new IDs as seen
+          newItems.forEach((a: Article) => categorySeenIdsRef.current.add(a.id));
+
+          // Append to category pool and sort newest-first
+          setCategoryArticlesPool(prev => {
+            const merged = [...prev, ...newItems];
+            merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+            return merged;
+          });
+
+          // Also update global articlesState for hero/sidebar usage
+          setArticlesState(prev => {
+            const existingIds = new Set(prev.map(a => a.id));
+            const freshItems = newItems.filter((a: Article) => !existingIds.has(a.id));
+            if (freshItems.length === 0) return prev;
+            const merged = [...prev, ...freshItems];
+            merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+            return merged;
+          });
+
+          // If raw items < fetchLimit, no more pages
+          if (rawItems.length < fetchLimit) {
+            setHasMoreCategoryNews(false);
+          }
+        } else if (rawItems.length >= fetchLimit && attempts < 1) {
+          // All items were duplicates but server had a full page - try next page (max 1 retry)
+          isFetchingCategoryRef.current = false;
+          return handleLoadMoreCategoryArticles(attempts + 1);
+        } else {
+          setHasMoreCategoryNews(false);
+        }
+      } else {
+        setHasMoreCategoryNews(false);
+      }
+    } catch (err) {
+      console.log('Category pagination notice:', err);
+      setHasMoreCategoryNews(false);
+    } finally {
+      isFetchingCategoryRef.current = false;
     }
-    setIsLoadingContent(true);
-    loadingTimerRef.current = setTimeout(() => {
-      setIsLoadingContent(false);
-    }, durationMs);
-  }, []);
+  }, [selectedCategory, hasMoreCategoryNews, channelsList]);
 
-  // Initial page load / refresh skeleton loading effect (800ms)
+  // Automatically fetch full detail content for the active hero article to populate its 2-line summary
   useEffect(() => {
-    triggerLoading(800);
-    return () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-    };
-  }, [triggerLoading]);
+    const activeHero = articlesState.find(a => a.isHero) || articlesState[0];
+    if (!activeHero || (activeHero.summary && activeHero.summary.trim().length >= 25)) return;
+
+    let isMounted = true;
+    async function loadHeroDetail() {
+      try {
+        const detailRes = await apiFetch(`/berita/${activeHero.id}`);
+        if (isMounted && detailRes.success && detailRes.data) {
+          const rawContent = detailRes.data.isi || detailRes.data.content || detailRes.data.ringkasan || '';
+          const cleanedText = stripHtml(rawContent).trim();
+          if (cleanedText) {
+            setArticlesState(prev => prev.map(art => 
+              art.id === activeHero.id ? { ...art, summary: cleanedText, content: rawContent } : art
+            ));
+          }
+        }
+      } catch (err) {
+        console.log('Hero detail fetch notice:', err);
+      }
+    }
+    loadHeroDetail();
+    return () => { isMounted = false; };
+  }, [articlesState]);
 
   // Selected Article for the Reader Modal
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   const homeScrollPosRef = React.useRef<number>(0);
 
-  const handleSelectArticle = (article: Article | null, forceScrollToTop: boolean = false) => {
+  const handleSelectArticle = (article: Article | null, forceScrollToTop: boolean = false, skipPushState: boolean = false) => {
+    triggerLoading(500);
     if (article) {
       if (!selectedArticle) {
         homeScrollPosRef.current = window.scrollY;
       }
+      setStaticModalSlug(null);
       setSelectedArticle(article);
-      triggerLoading(600);
       window.scrollTo({ top: 0, behavior: 'auto' });
+
+      if (!skipPushState && typeof window !== 'undefined') {
+        const url = `?article=${encodeURIComponent(article.slug || article.id)}`;
+        window.history.pushState({ type: 'article', id: article.id }, '', url);
+      }
+      finishLoading(500);
     } else {
       setSelectedArticle(null);
+      setStaticModalSlug(null);
       if (forceScrollToTop) {
         homeScrollPosRef.current = 0;
       }
       setTimeout(() => {
         window.scrollTo({ top: homeScrollPosRef.current, behavior: 'auto' });
       }, 0);
+
+      if (!skipPushState && typeof window !== 'undefined') {
+        let url = '/';
+        if (submittedSearchQuery) {
+          url = `?q=${encodeURIComponent(submittedSearchQuery)}`;
+        } else if (selectedTag) {
+          url = `?tag=${encodeURIComponent(selectedTag)}`;
+        } else if (selectedCategory && selectedCategory !== 'SEMUA') {
+          url = `?category=${encodeURIComponent(selectedCategory)}`;
+        }
+        window.history.pushState({ type: 'list' }, '', url);
+      }
+      setNavNonce((prev) => prev + 1);
     }
   };
+
+  const handleCategorySelect = (cat: string, skipPushState: boolean = false) => {
+    setSelectedCategory(cat);
+    setStaticModalSlug(null);
+    setShowBookmarksOnly(false);
+    setSelectedArticle(null);
+    setSubmittedSearchQuery(null);
+    setSelectedTag(null);
+    setSearchQuery("");
+    setSearchDate("");
+    triggerLoading(500);
+    setNavNonce((prev) => prev + 1);
+
+    if (!skipPushState && typeof window !== 'undefined') {
+      const url = cat === 'SEMUA' ? '/' : `?category=${encodeURIComponent(cat)}`;
+      window.history.pushState({ type: 'category', category: cat }, '', url);
+    }
+  };
+
+  const handleSearchSubmit = (query: string, skipPushState: boolean = false) => {
+    setSubmittedSearchQuery(query);
+    setStaticModalSlug(null);
+    setSelectedArticle(null);
+    setSelectedTag(null);
+    setSearchDate("");
+    triggerLoading(500);
+    setNavNonce((prev) => prev + 1);
+
+    if (!skipPushState && typeof window !== 'undefined') {
+      const url = `?q=${encodeURIComponent(query)}`;
+      window.history.pushState({ type: 'search', query }, '', url);
+    }
+  };
+
+  const handleTagSelect = (tag: string, skipPushState: boolean = false) => {
+    setSelectedTag(tag);
+    setSelectedArticle(null);
+    setStaticModalSlug(null);
+    setSubmittedSearchQuery(null);
+    triggerLoading(500);
+    setNavNonce((prev) => prev + 1);
+
+    if (!skipPushState && typeof window !== 'undefined') {
+      const url = `?tag=${encodeURIComponent(tag)}`;
+      window.history.pushState({ type: 'tag', tag }, '', url);
+    }
+  };
+
+  const handleStaticPageSelect = (slug: string, skipPushState: boolean = false) => {
+    triggerLoading(500);
+    setStaticModalSlug(slug);
+    setSelectedArticle(null);
+    setSelectedCategory("SEMUA");
+    setShowBookmarksOnly(false);
+    setSubmittedSearchQuery(null);
+    setSelectedTag(null);
+    setSearchQuery("");
+    setSearchDate("");
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    if (!skipPushState && typeof window !== 'undefined') {
+      const url = `?page=${encodeURIComponent(slug)}`;
+      window.history.pushState({ type: 'static_page', slug }, '', url);
+    }
+    finishLoading(500);
+  };
+
+  // Handle Browser Back / Forward (popstate) event with smooth loading skeleton
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePopState = () => {
+      // Always trigger smooth loading skeleton transition on browser back/forward navigation
+      triggerLoading(500);
+
+      const params = new URLSearchParams(window.location.search);
+      const articleParam = params.get('article');
+      const categoryParam = params.get('category');
+      const searchParam = params.get('q');
+      const tagParam = params.get('tag');
+      const pageParam = params.get('page');
+
+      if (articleParam) {
+        setStaticModalSlug(null);
+        const pool = masterLiveArticlesRef.current.length > 0 
+          ? masterLiveArticlesRef.current 
+          : (masterLiveArticles.length > 0 ? masterLiveArticles : articlesState);
+        
+        const cleanIdOrSlug = articleParam.replace('laravel-', '');
+        const matched = pool.find((a) => a.id === articleParam || a.id === `laravel-${cleanIdOrSlug}` || a.slug === articleParam || a.slug === cleanIdOrSlug);
+        
+        if (matched) {
+          setSelectedArticle(matched);
+          window.scrollTo({ top: 0, behavior: 'auto' });
+          finishLoading(500);
+        } else {
+          apiFetch(`/berita/${encodeURIComponent(cleanIdOrSlug)}`)
+            .then((res) => {
+              if (res.success && res.data) {
+                const art = transformLaravelPostToArticle(res.data);
+                setSelectedArticle(art);
+                window.scrollTo({ top: 0, behavior: 'auto' });
+              } else {
+                setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+              }
+              finishLoading(500);
+            })
+            .catch(() => {
+              setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+              finishLoading(500);
+            });
+        }
+      } else if (pageParam && pageParam.trim()) {
+        setSelectedArticle(null);
+        setStaticModalSlug(pageParam.trim());
+        setSelectedTag(null);
+        setSubmittedSearchQuery(null);
+        finishLoading(500);
+      } else {
+        setSelectedArticle(null);
+        setStaticModalSlug(null);
+
+        if (searchParam && searchParam.trim()) {
+          setSubmittedSearchQuery(searchParam.trim());
+          setSelectedTag(null);
+        } else if (tagParam && tagParam.trim()) {
+          setSelectedTag(tagParam.trim());
+          setSubmittedSearchQuery(null);
+        } else if (categoryParam && categoryParam.trim()) {
+          setSelectedCategory(categoryParam.trim().toUpperCase());
+          setSubmittedSearchQuery(null);
+          setSelectedTag(null);
+        } else {
+          setSelectedCategory('SEMUA');
+          setSubmittedSearchQuery(null);
+          setSelectedTag(null);
+        }
+
+        setNavNonce((prev) => prev + 1);
+        finishLoading(500);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles]);
+
+  // Initial URL Parameter sync on startup
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const categoryParam = params.get('category');
+    const articleParam = params.get('article');
+    const searchParam = params.get('q');
+    const tagParam = params.get('tag');
+    const pageParam = params.get('page');
+
+    if (articleParam) {
+      triggerLoading(500);
+      const cleanIdOrSlug = articleParam.replace('laravel-', '');
+      apiFetch(`/berita/${encodeURIComponent(cleanIdOrSlug)}`)
+        .then((res) => {
+          if (res.success && res.data) {
+            setSelectedArticle(transformLaravelPostToArticle(res.data));
+          } else {
+            setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+          }
+          finishLoading(500);
+        })
+        .catch(() => {
+          setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+          finishLoading(500);
+        });
+    } else if (pageParam) {
+      setStaticModalSlug(pageParam.trim());
+      triggerLoading(500);
+    } else if (categoryParam) {
+      setSelectedCategory(categoryParam.trim().toUpperCase());
+    } else if (searchParam) {
+      setSubmittedSearchQuery(searchParam.trim());
+    } else if (tagParam) {
+      setSelectedTag(tagParam.trim());
+    }
+  }, [triggerLoading, finishLoading]);
 
   // User's own comments list for deletion permission
   const [myCommentIds, setMyCommentIds] = useState<string[]>(() => {
@@ -514,13 +1002,17 @@ export default function App() {
     }
   }, [searchDate]);
 
+  // Master pool of live articles across all mixed categories for sidebars, drawers, and article detail widgets
+  const masterArticlesPool = masterLiveArticlesRef.current.length > 0 
+    ? masterLiveArticlesRef.current 
+    : (masterLiveArticles.length > 0 ? masterLiveArticles : articlesState);
+
   return (
-    <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200 ${isDarkMode ? 'dark' : ''}`}>
-      
+    <div className={`min-h-screen ${isDarkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} flex flex-col font-sans transition-colors duration-200 antialiased`}>
       {/* A. Top Editorial Bar & Breaking News Ticker */}
       <BreakingTicker 
         items={breakingNewsList} 
-        articles={popularNewsList.length > 0 ? popularNewsList : articlesState}
+        articles={popularNewsList.length > 0 ? popularNewsList : masterArticlesPool}
         onSelectArticle={handleSelectArticle}
       />
 
@@ -529,17 +1021,9 @@ export default function App() {
         bookmarkCount={bookmarkedIds.length}
         showBookmarksOnly={showBookmarksOnly}
         onToggleBookmarksOnly={() => setShowBookmarksOnly(!showBookmarksOnly)}
-        selectedCategory={(submittedSearchQuery || selectedTag || activeModalArticle) ? "" : selectedCategory}
-        onSelectCategory={(cat) => {
-          setSelectedCategory(cat);
-          setShowBookmarksOnly(false);
-          handleSelectArticle(null, true);
-          setSubmittedSearchQuery(null);
-          setSelectedTag(null);
-          setSearchQuery("");
-          triggerLoading(600);
-        }}
-        articles={articlesState}
+        selectedCategory={(submittedSearchQuery || selectedTag || activeModalArticle || staticModalSlug) ? "" : selectedCategory}
+        onSelectCategory={(cat) => handleCategorySelect(cat)}
+        articles={masterArticlesPool}
         onSelectArticle={(art) => {
           handleSelectArticle(art);
           setSubmittedSearchQuery(null);
@@ -552,34 +1036,18 @@ export default function App() {
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onSearchSubmit={(query) => {
-          setSubmittedSearchQuery(query);
-          handleSelectArticle(null, true);
-          setSelectedTag(null);
-          setSearchDate("");
-          triggerLoading(600);
-        }}
+        onSearchSubmit={(query) => handleSearchSubmit(query)}
       />
 
       {/* C. Sticky Navigation Category & Live Search */}
       <StickyNav
-        selectedCategory={(submittedSearchQuery || selectedTag || activeModalArticle) ? "" : selectedCategory}
-        onSelectCategory={(cat) => {
-          setSelectedCategory(cat);
-          // Auto-disable Bookmarks Only filter if they specifically change categories to avoid confusion
-          setShowBookmarksOnly(false);
-          handleSelectArticle(null, true);
-          setSubmittedSearchQuery(null);
-          setSelectedTag(null);
-          setSearchQuery("");
-          setSearchDate("");
-          triggerLoading(600);
-        }}
+        selectedCategory={(submittedSearchQuery || selectedTag || activeModalArticle || staticModalSlug) ? "" : selectedCategory}
+        onSelectCategory={(cat) => handleCategorySelect(cat)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         isDrawerOpen={isDrawerOpen}
         onToggleDrawer={setIsDrawerOpen}
-        articles={articlesState}
+        articles={masterArticlesPool}
         onSelectArticle={(art) => {
           handleSelectArticle(art);
           setSubmittedSearchQuery(null);
@@ -587,13 +1055,7 @@ export default function App() {
           setSearchQuery("");
           setSearchDate("");
         }}
-        onSearchSubmit={(query) => {
-          setSubmittedSearchQuery(query);
-          handleSelectArticle(null, true);
-          setSelectedTag(null);
-          setSearchDate("");
-          triggerLoading(600);
-        }}
+        onSearchSubmit={(query) => handleSearchSubmit(query)}
       />
 
       {activeModalArticle ? (
@@ -611,18 +1073,10 @@ export default function App() {
                 onDeleteComment={handleDeleteComment}
                 myCommentIds={myCommentIds}
                 onShare={(msg) => triggerToast(msg, 'success')}
-                onSelectCategory={(cat) => {
-                  setSelectedCategory(cat);
-                  setShowBookmarksOnly(false);
-                  triggerLoading(600);
-                }}
-                articles={articlesState}
+                onSelectCategory={(cat) => handleCategorySelect(cat)}
+                articles={masterArticlesPool}
                 onSelectArticle={handleSelectArticle}
-                onSelectTag={(tag) => {
-                  setSelectedTag(tag);
-                  handleSelectArticle(null);
-                  triggerLoading(600);
-                }}
+                onSelectTag={(tag) => handleTagSelect(tag)}
                 isLoading={isLoadingContent}
               />
             </section>
@@ -633,7 +1087,7 @@ export default function App() {
                 onSelectPopular={handleSelectPopular} 
                 hideExtraWidgets={true} 
                 variant="detail" 
-                articles={articlesState}
+                articles={masterArticlesPool}
                 popularArticles={popularNewsList}
                 onSelectArticle={handleSelectArticle}
                 isLoading={isLoadingContent}
@@ -641,6 +1095,14 @@ export default function App() {
             </section>
 
           </div>
+        </main>
+      ) : staticModalSlug ? (
+        <main className="flex-1 max-w-7xl w-full mx-auto">
+          <StaticPageView
+            slug={staticModalSlug}
+            isLoading={isLoadingContent}
+            onNavigateHome={() => handleCategorySelect("SEMUA")}
+          />
         </main>
       ) : (submittedSearchQuery || selectedTag) ? (
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 py-8 animate-fade-in">
@@ -662,7 +1124,7 @@ export default function App() {
                 onSelectPopular={handleSelectPopular} 
                 variant="home" 
                 showSearchBanners={true}
-                articles={articlesState}
+                articles={masterArticlesPool}
                 popularArticles={popularNewsList}
                 onSelectArticle={handleSelectArticle}
                 isLoading={isLoadingContent}
@@ -691,7 +1153,7 @@ export default function App() {
                 onSelectPopular={handleSelectPopular} 
                 variant="home" 
                 showSearchBanners={true}
-                articles={articlesState}
+                articles={masterArticlesPool}
                 popularArticles={popularNewsList}
                 onSelectArticle={handleSelectArticle}
                 isLoading={isLoadingContent}
@@ -767,9 +1229,11 @@ export default function App() {
               );
             }
 
-            const categoryArticles = articlesState.filter(
-              (art) => art.category.toUpperCase() === selectedCategory.toUpperCase()
-            );
+            const categoryArticles = categoryArticlesPool.length > 0 
+              ? categoryArticlesPool 
+              : articlesState.filter(
+                  (art) => art.category.toUpperCase() === selectedCategory.toUpperCase()
+                );
             const heroArticle = categoryArticles.find((art) => art.isHero) || categoryArticles[0];
             
             if (!heroArticle) return null;
@@ -807,8 +1271,8 @@ export default function App() {
                         {heroArticle.title}
                       </h2>
                       
-                      <p className="font-sans text-[10px] sm:text-xs md:text-sm text-slate-300 leading-relaxed line-clamp-2 font-normal opacity-90">
-                        {stripHtml(heroArticle.subtitle || heroArticle.summary || heroArticle.content)}
+                      <p className="font-sans text-xs sm:text-sm md:text-base text-slate-200 leading-relaxed line-clamp-2 font-normal opacity-95 mt-1 sm:mt-2">
+                        {stripHtml(heroArticle.summary || heroArticle.subtitle || heroArticle.content) || `Simak ulasan lengkap dan kabar berita terkini mengenai ${heroArticle.title} selengkapnya di SinPo.id.`}
                       </p>
                       <div className="flex items-center justify-between border-t border-white/15 pt-3 sm:pt-4 mt-2">
                         <div className="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-xs text-slate-300 font-sans">
@@ -865,27 +1329,30 @@ export default function App() {
           {/* Standard Layout for category list (full-width for custom 3-column) */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 pt-4 md:pt-6 pb-8 animate-fade-in">
             {(() => {
-              const matched = articlesState.filter((art) => {
-                const sel = selectedCategory.toUpperCase();
-                const artCat = art.category.toUpperCase();
-                if (sel === 'EKBIS' || sel === 'EKONOMI & BISNIS') {
-                  return artCat === 'EKBIS' || artCat === 'EKONOMI & BISNIS' || artCat === 'EKONOMI';
-                }
-                return artCat === sel || artCat.includes(sel) || sel.includes(artCat);
-              });
-              const categoryArticles = matched.length > 0 ? matched : articlesState;
-              const heroArticle = categoryArticles.find((art) => art.isHero) || categoryArticles[0];
-              const otherArticles = heroArticle 
-                ? categoryArticles.filter((art) => art.id !== heroArticle.id) 
-                : categoryArticles;
+              // Use dedicated category pool for the list (properly paginated from API)
+              const poolArticles = categoryArticlesPool.length > 0 ? categoryArticlesPool : articlesState;
+              const heroArticle = poolArticles.find((art) => art.isHero) || poolArticles[0];
+              const otherFourArticles = heroArticle
+                ? poolArticles.filter((art) => art.id !== heroArticle.id).slice(0, 4)
+                : [];
+              
+              // Exclude all 5 articles already displayed in the top Category Hero Banner
+              const heroBannerArticleIds = new Set([
+                heroArticle?.id,
+                ...otherFourArticles.map((art) => art.id)
+              ].filter(Boolean));
+
+              const remainingArticles = poolArticles.filter((art) => !heroBannerArticleIds.has(art.id));
 
               return (
                 <CategoryPageView
                   category={selectedCategory}
-                  articles={otherArticles}
-                  allCategoryArticles={categoryArticles}
+                  articles={remainingArticles}
+                  allCategoryArticles={masterArticlesPool}
                   onSelectArticle={handleSelectArticle}
                   isLoading={isLoadingContent}
+                  onLoadMoreRemote={handleLoadMoreCategoryArticles}
+                  hasMoreRemote={hasMoreCategoryNews}
                 />
               );
             })()}
@@ -918,7 +1385,7 @@ export default function App() {
                 <Sidebar 
                   onSelectPopular={handleSelectPopular} 
                   variant="home" 
-                  articles={articlesState}
+                  articles={masterArticlesPool}
                   popularArticles={popularNewsList}
                   onSelectArticle={handleSelectArticle}
                   isLoading={isLoadingContent}
@@ -958,26 +1425,26 @@ export default function App() {
             <p className="text-slate-500 font-sans leading-relaxed max-w-sm text-[11px] md:text-xs">
               Portal Berita Terpercaya menyajikan informasi terkini dan terpopuler dari seluruh penjuru tanah air secara tajam dan berimbang.
             </p>
-            {/* Social Media Links */}
+            {/* Social Media Links matching sinpo 2 */}
             <div className="flex items-center gap-3.5 mt-1">
-              <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="Instagram Sin Po">
+              <a href="https://www.instagram.com/sinpotv" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="Instagram SinPo TV">
                 <Instagram className="h-4 w-4" />
               </a>
-              <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="Facebook Sin Po">
-                <Facebook className="h-4 w-4" />
-              </a>
-              <a href="https://x.com" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="X (Twitter) Sin Po">
+              <a href="https://x.com/sinpotv" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="X (Twitter) SinPo TV">
                 <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
                   <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                 </svg>
               </a>
-              <a href="https://tiktok.com" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300 flex items-center justify-center" title="TikTok Sin Po">
+              <a href="https://www.tiktok.com/@sinpotv" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300 flex items-center justify-center" title="TikTok SinPo TV">
                 <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
                   <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .8.11v-3.5a6.39 6.39 0 0 0-3.11.8 6.27 6.27 0 0 0-3.3 5.48 6.28 6.28 0 0 0 10.15 4.9 6.24 6.24 0 0 0 2.22-4.9V8a8.15 8.15 0 0 0 5.23 2.08V6.66a4.86 4.86 0 0 1-1.92-.47 4.8 4.8 0 0 1-1.31-.96z" />
                 </svg>
               </a>
-              <a href="https://youtube.com" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="YouTube Sin Po">
+              <a href="https://youtube.com/@sinpotv?si=hiaKrjanN5Zh1GFe" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="SIN PO TV (YouTube)">
                 <Youtube className="h-4 w-4" />
+              </a>
+              <a href="https://www.facebook.com/people/SIN-PO-TV/61552603735655/" target="_blank" rel="noopener noreferrer" className="p-2 bg-slate-900 hover:bg-brand-red-600 text-slate-400 hover:text-white rounded-full transition-all duration-300" title="Facebook SinPo TV">
+                <Facebook className="h-4 w-4" />
               </a>
             </div>
           </div>
@@ -1049,46 +1516,76 @@ export default function App() {
             </div>
           </div>
  
-          {/* Column 3: Perusahaan Info Buttons */}
+          {/* Column 3: Perusahaan Info Links */}
           <div className="flex flex-col gap-3 text-left col-span-1">
             <h4 className="font-sans font-extrabold uppercase tracking-widest text-[11px] text-slate-200">PERUSAHAAN</h4>
             <div className="flex flex-col gap-2 font-sans text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              <button 
-                onClick={() => setStaticModalSlug("tentang-kami")}
+              <a 
+                href="?page=tentang-kami"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("tentang-kami");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 TENTANG KAMI
-              </button>
-              <button 
-                onClick={() => setStaticModalSlug("redaksi")}
+              </a>
+              <a 
+                href="?page=redaksi"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("redaksi");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 REDAKSI
-              </button>
-              <button 
-                onClick={() => setStaticModalSlug("hak-jawab")}
+              </a>
+              <a 
+                href="?page=hak-jawab"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("hak-jawab");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HAK JAWAB
-              </button>
-              <button 
-                onClick={() => setStaticModalSlug("hubungi-kami")}
+              </a>
+              <a 
+                href="?page=hubungi-kami"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("hubungi-kami");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HUBUNGI KAMI
-              </button>
-              <button 
-                onClick={() => setStaticModalSlug("kebijakan-privasi")}
+              </a>
+              <a 
+                href="?page=kebijakan-privasi"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("kebijakan-privasi");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 KEBIJAKAN PRIVASI
-              </button>
-              <button 
-                onClick={() => setStaticModalSlug("pedoman-siber")}
+              </a>
+              <a 
+                href="?page=pedoman-siber"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  handleStaticPageSelect("pedoman-siber");
+                }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 PEDOMAN PEMBERITAAN MEDIA SIBER
-              </button>
+              </a>
             </div>
           </div>
         </div>
@@ -1112,12 +1609,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {/* Static Page Modal (Redaksi, Pedoman Siber, Tentang Kami, etc.) */}
-      <StaticPageModal
-        slug={staticModalSlug}
-        onClose={() => setStaticModalSlug(null)}
-      />
 
     </div>
   );

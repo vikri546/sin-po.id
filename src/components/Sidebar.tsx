@@ -145,8 +145,13 @@ export default function Sidebar({
                 const bongkarArticle = articles.find(a => a.category.toUpperCase() === 'BONGKAR' || a.isInvestigative) || articles[0];
                 if (!bongkarArticle) return null;
                 return (
-                  <div
-                    onClick={() => onSelectArticle?.(bongkarArticle)}
+                  <a
+                    href={`?article=${encodeURIComponent(bongkarArticle.slug || bongkarArticle.id)}`}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onSelectArticle?.(bongkarArticle);
+                    }}
                     className="group cursor-pointer flex flex-col gap-2 transition-all duration-300 py-1"
                   >
                     <div className="relative aspect-[16/10] w-full overflow-hidden rounded-[3px]">
@@ -161,7 +166,7 @@ export default function Sidebar({
                     <h4 className="font-sans text-xs md:text-sm font-bold text-slate-200 group-hover:text-brand-red-500 transition-colors leading-snug line-clamp-2">
                       {bongkarArticle.title}
                     </h4>
-                  </div>
+                  </a>
                 );
               })()}
             </motion.div>
@@ -190,8 +195,13 @@ export default function Sidebar({
                 const sinpoDuluArticle = articles.find(a => a.category.toUpperCase() === 'SIN PO DULU') || articles[1] || articles[0];
                 if (!sinpoDuluArticle) return null;
                 return (
-                  <div
-                    onClick={() => onSelectArticle?.(sinpoDuluArticle)}
+                  <a
+                    href={`?article=${encodeURIComponent(sinpoDuluArticle.slug || sinpoDuluArticle.id)}`}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      e.preventDefault();
+                      onSelectArticle?.(sinpoDuluArticle);
+                    }}
                     className="group cursor-pointer flex flex-col gap-2 transition-all duration-300 py-1"
                   >
                     <div className="relative aspect-[16/10] w-full overflow-hidden rounded-[3px]">
@@ -206,7 +216,7 @@ export default function Sidebar({
                     <h4 className="font-sans text-xs md:text-sm font-bold text-slate-200 group-hover:text-brand-red-500 transition-colors leading-snug line-clamp-2">
                       {sinpoDuluArticle.title}
                     </h4>
-                  </div>
+                  </a>
                 );
               })()}
             </motion.div>
@@ -244,8 +254,11 @@ export default function Sidebar({
             return listToRender.map((pop, index) => {
               const numStr = String(index + 1).padStart(2, '0');
               const imageUrl = pop.imageUrl || "https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=800&q=80";
+              const targetUrl = `?article=${encodeURIComponent(pop.slug || pop.id)}`;
 
-              const handleClick = () => {
+              const handleClick = (e: React.MouseEvent) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
                 if (onSelectArticle) {
                   onSelectArticle(pop);
                 } else {
@@ -256,8 +269,9 @@ export default function Sidebar({
               if (variant === 'detail') {
                 if (index === 0) {
                   return (
-                    <div
+                    <a
                       key={pop.id}
+                      href={targetUrl}
                       onClick={handleClick}
                       className="group cursor-pointer flex flex-col gap-2.5 border-b border-slate-100 dark:border-slate-900/50 pb-4"
                     >
@@ -282,13 +296,14 @@ export default function Sidebar({
                           </span>
                         </div>
                       </div>
-                    </div>
+                    </a>
                   );
                 }
 
                 return (
-                  <div
+                  <a
                     key={pop.id}
+                    href={targetUrl}
                     onClick={handleClick}
                     className="flex gap-3 items-center group cursor-pointer border-b border-slate-100 dark:border-slate-900/50 pb-3 last:border-b-0 last:pb-0"
                   >
@@ -311,14 +326,15 @@ export default function Sidebar({
                         {pop.date}
                       </span>
                     </div>
-                  </div>
+                  </a>
                 );
               }
 
               // Otherwise, variant === 'home' style
               return (
-                <div
+                <a
                   key={pop.id}
+                  href={targetUrl}
                   onClick={handleClick}
                   className="flex gap-3 items-start group cursor-pointer border-b border-slate-100 dark:border-slate-900/50 pb-3 last:border-b-0 last:pb-0"
                 >
@@ -337,7 +353,7 @@ export default function Sidebar({
                       {pop.date}
                     </span>
                   </div>
-                </div>
+                </a>
               );
             });
           })()}

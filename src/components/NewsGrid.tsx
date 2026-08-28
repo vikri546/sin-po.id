@@ -11,6 +11,7 @@ interface NewsGridProps {
   onToggleBookmark: (id: string) => void;
   onSelectArticle: (article: Article) => void;
   selectedCategory: string;
+  popularArticles?: Article[];
   onSelectPopular?: (popularId: string) => void;
   isLoading?: boolean;
 }
@@ -21,6 +22,7 @@ export default function NewsGrid({
   onToggleBookmark, 
   onSelectArticle, 
   selectedCategory,
+  popularArticles,
   onSelectPopular,
   isLoading = false
 }: NewsGridProps) {
@@ -148,6 +150,17 @@ export default function NewsGrid({
   const gridArticles = articles.filter(a => a.id !== heroArticle?.id).slice(0, 6);
 
   if (articles.length === 0) {
+    if (isLoading) {
+      return (
+        <div className="flex flex-col gap-6 w-full animate-fade-in">
+          <div className="relative rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg">
+            <div className="relative h-[480px] md:h-[580px] w-full overflow-hidden rounded-[5px]">
+              <Skeleton className="w-full h-full rounded-[5px]" />
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div id="empty-news-state" className="text-center py-12 px-4 border border-slate-200 dark:border-slate-800 rounded-[5px] bg-white dark:bg-slate-950">
         <h4 className="font-sans text-sm md:text-base font-bold text-slate-800 dark:text-slate-200">Tidak Ada Berita Ditemukan</h4>
@@ -173,10 +186,15 @@ export default function NewsGrid({
 
       {/* A. Hero Unit: Grand Featured Showcase */}
       {heroArticle && (
-        <article
+        <a
           id={`hero-showcase-${heroArticle.id}`}
-          className="group relative rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-300"
-          onClick={() => onSelectArticle(heroArticle)}
+          href={`?article=${encodeURIComponent(heroArticle.slug || heroArticle.id)}`}
+          className="group relative block rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-300"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            onSelectArticle(heroArticle);
+          }}
           onMouseEnter={handleHeroMouseEnter}
           onMouseLeave={handleHeroMouseLeave}
         >
@@ -223,11 +241,11 @@ export default function NewsGrid({
                 </span>
               </div>
 
-              <div className="flex items-center justify-between w-full mt-1 md:mt-2 gap-2 md:gap-4">
-                <div className="relative inline-flex flex-col self-start">
-                  <div className="flex items-center gap-1 text-[10px] md:text-xs font-sans font-bold uppercase tracking-widest text-white">
-                    <span>BACA SELENGKAPNYA</span>
-                    <div ref={heroArrowRef} className="inline-flex items-center">
+              <div className="flex items-center justify-between w-full mt-1 md:mt-2 gap-2 md:gap-3">
+                <div className="relative inline-flex flex-col self-start shrink-0 whitespace-nowrap">
+                  <div className="flex items-center gap-1.5 text-[10px] md:text-xs font-sans font-bold uppercase tracking-widest text-white whitespace-nowrap">
+                    <span className="whitespace-nowrap">BACA SELENGKAPNYA</span>
+                    <div ref={heroArrowRef} className="inline-flex items-center shrink-0">
                       <ArrowRight className="h-3 w-3 md:h-3.5 md:w-3.5 text-white filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
                     </div>
                   </div>
@@ -238,13 +256,13 @@ export default function NewsGrid({
                   />
                 </div>
 
-                <p className="text-[11px] font-sans italic text-white/60">
+                <p className="text-[10px] md:text-[11px] font-sans italic text-white/80 text-right line-clamp-2 ml-auto leading-tight">
                   {heroArticle.caption ? `Foto: ${heroArticle.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}
                 </p>
               </div>
             </div>
           </div>
-        </article>
+        </a>
       )}
 
       {/* B. Mobile Only: Berita Terpopuler */}
@@ -257,12 +275,17 @@ export default function NewsGrid({
           </div>
 
           <div className="flex flex-col gap-4">
-            {POPULAR_NEWS.map((pop, index) => {
+            {(popularArticles && popularArticles.length > 0 ? popularArticles : articles.slice(0, 5)).map((pop, index) => {
               const numStr = String(index + 1).padStart(2, '0');
               return (
-                <div
+                <a
                   key={pop.id}
-                  onClick={() => onSelectPopular(pop.id)}
+                  href={`?article=${encodeURIComponent(pop.slug || pop.id)}`}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelectPopular(pop.id);
+                  }}
                   className="flex gap-3 items-start group cursor-pointer border-b border-slate-100 dark:border-slate-900/50 pb-3 last:border-b-0 last:pb-0"
                 >
                   {/* Large high-contrast red numbers with fixed width for perfect vertical text alignment */}
@@ -281,7 +304,7 @@ export default function NewsGrid({
                       {pop.date}
                     </span>
                   </div>
-                </div>
+                </a>
               );
             })}
           </div>
@@ -300,10 +323,15 @@ export default function NewsGrid({
             {gridArticles.map((article, idx) => {
               const isFirst = idx === 0;
               return (
-                <article
+                <a
                   key={article.id}
                   id={`article-card-${article.id}`}
-                  onClick={() => onSelectArticle(article)}
+                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    e.preventDefault();
+                    onSelectArticle(article);
+                  }}
                   className={`group flex cursor-pointer bg-transparent last:border-b-0 ${
                     isFirst 
                       ? "flex-col md:flex-row gap-3 md:gap-4 py-4 border-b border-slate-200 dark:border-slate-800" 
@@ -351,7 +379,7 @@ export default function NewsGrid({
                       </span>
                     </div>
                   </div>
-                </article>
+                </a>
               );
             })}
           </div>

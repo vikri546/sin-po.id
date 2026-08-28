@@ -168,9 +168,12 @@ export default function Header({
                   ) : (
                     <div className="w-full bg-white dark:bg-slate-900 rounded-[5px] border border-slate-100 dark:border-slate-800/80 p-1 divide-y divide-slate-100 dark:divide-slate-800/60 max-h-[45vh] overflow-y-auto custom-scrollbar shadow-none">
                       {filteredLiveArticles.map((art) => (
-                        <div
+                        <a
                           key={art.id}
-                          onClick={() => {
+                          href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                            e.preventDefault();
                             if (onSelectArticle) {
                               onSelectArticle(art);
                             }
@@ -199,7 +202,7 @@ export default function Header({
                               {art.title}
                             </h4>
                           </div>
-                        </div>
+                        </a>
                       ))}
                     </div>
                   )}
@@ -218,15 +221,15 @@ export default function Header({
         
         {/* Left: Social Media Networks */}
         <div className="flex items-center gap-2 sm:gap-4 text-slate-500 dark:text-slate-400 order-1 w-auto justify-start">
-          <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors" title="Instagram Sin Po">
-            <Instagram className="h-4 w-4 md:h-5 md:w-5" />
-          </a>
-          <a href="https://x.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors flex items-center justify-center" title="X (Twitter) Sin Po">
+          <a href="https://x.com/sinpotv" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors flex items-center justify-center" title="X (Twitter) SinPo TV">
             <svg className="h-3.5 w-3.5 md:h-4 md:w-4 fill-current" viewBox="0 0 24 24">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
             </svg>
           </a>
-          <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors" title="Facebook Sin Po">
+          <a href="https://www.instagram.com/sinpotv" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors" title="Instagram SinPo TV">
+            <Instagram className="h-4 w-4 md:h-5 md:w-5" />
+          </a>
+          <a href="https://www.facebook.com/people/SIN-PO-TV/61552603735655/" target="_blank" rel="noopener noreferrer" className="hover:text-brand-red-600 transition-colors" title="Facebook SinPo TV">
             <Facebook className="h-4 w-4 md:h-5 md:w-5" />
           </a>
         </div>
@@ -245,13 +248,13 @@ export default function Header({
           </button>
         </div>
 
-        {/* Right: Premium Mode Toggle Button */}
+        {/* Right: Premium Mode Toggle Button & Mobile Search */}
         <div className="order-3 w-auto flex items-center justify-end gap-2 md:gap-3">
-          {/* Mobile Search Button (borderless, transparent) */}
+          {/* Mobile Only Search Button */}
           <button
-            onClick={() => setShowMobileSearchInput(true)}
-            className="flex md:hidden p-1 text-slate-600 dark:text-slate-400 hover:text-brand-red-600 dark:hover:text-red-500 transition-colors bg-transparent border-none outline-none cursor-pointer focus:outline-none"
-            title="Cari berita"
+            onClick={() => setShowMobileSearchInput(!showMobileSearchInput)}
+            className="flex md:hidden p-1.5 text-slate-700 dark:text-slate-300 hover:text-brand-red-600 dark:hover:text-red-500 bg-transparent border-none outline-none cursor-pointer focus:outline-none"
+            title="Cari Berita"
           >
             <Search className="h-5 w-5" />
           </button>
@@ -422,13 +425,16 @@ export default function Header({
                   </h3>
                   <div className="flex flex-col gap-4">
                     {articles && articles.slice(0, 5).map((art) => (
-                      <div
+                      <a
                         key={art.id}
-                        onClick={() => {
+                        href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                        onClick={(e) => {
+                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                          e.preventDefault();
                           if (onSelectArticle) onSelectArticle(art);
                           setIsDrawerOpen(false);
                         }}
-                        className="group cursor-pointer space-y-1"
+                        className="group cursor-pointer space-y-1 block"
                       >
                         <span className="font-sans text-[9px] font-bold text-brand-red-600 uppercase tracking-wider">
                           {art.category}
@@ -439,7 +445,7 @@ export default function Header({
                         <span className="block font-sans text-[9px] text-slate-400 dark:text-slate-500 font-normal">
                           {art.date}
                         </span>
-                      </div>
+                      </a>
                     ))}
                   </div>
                 </div>

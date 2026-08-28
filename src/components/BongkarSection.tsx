@@ -3,6 +3,7 @@ import { RefreshCw, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
+import { apiFetch, transformLaravelPostToArticle } from '../lib/apiClient';
 
 interface BongkarSectionProps {
   articles: Article[];
@@ -11,31 +12,168 @@ interface BongkarSectionProps {
 }
 
 export default function BongkarSection({ articles, onSelectArticle, isLoading = false }: BongkarSectionProps) {
-  const [refreshKey, setRefreshKey] = useState(0);
   const [visibleCount, setVisibleCount] = useState(10);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  // Reset count if articles list changes
+  // Dedicated articles state for BONGKAR & SIN PO DULU from live API
+  const [bongkarArticles, setBongkarArticles] = useState<Article[]>([]);
+  const [sinpoDuluArticles, setSinpoDuluArticles] = useState<Article[]>([]);
+
+  // Index state for shuffle rotation
+  const [bongkarIdx, setBongkarIdx] = useState(0);
+  const [sinpoDuluIdx, setSinpoDuluIdx] = useState(0);
+
+  // Dedicated Fallback Articles specifically for BONGKAR category
+  const FALLBACK_BONGKAR_ARTICLES: Article[] = useMemo(() => [
+    {
+      id: 'bongkar-1',
+      slug: 'bongkar-dugaan-kebocoran-anggaran-transportasi',
+      title: 'BONGKAR: Menelusuri Dugaan Kebocoran Anggaran Daerah Senilai Ratusan Miliar di Sektor Transportasi',
+      subtitle: 'Investigasi mendalam mengenai kejanggalan dokumen kontrak ganda pembangunan fasilitas publik.',
+      summary: 'Investigasi mendalam mengenai kejanggalan dokumen kontrak ganda pembangunan fasilitas publik.',
+      content: 'Tim Investigasi BONGKAR SinPo.id memperoleh salinan dokumen kontrak ganda pembangunan fasilitas publik...',
+      category: 'BONGKAR',
+      imageUrl: 'https://sinpo.id/storage/2026/08/bongkar-investigasi.jpg',
+      date: '1 Jam yang lalu',
+      author: 'Tim BONGKAR SinPo',
+      readTime: '4 Menit Baca',
+      tags: ['BONGKAR', 'INVESTIGASI', 'KORUPSI'],
+      comments: [],
+      isHero: false
+    },
+    {
+      id: 'bongkar-2',
+      slug: 'bongkar-aliran-dana-siluman-proyek-infrastruktur',
+      title: 'BONGKAR: Jejak Aliran Dana Siluman Proyek Infrastruktur Publik yang Mangkrak',
+      subtitle: 'Penelusuran transaksi keuangan mencurigakan yang mengalir ke rekening konsorsium pelaksana.',
+      summary: 'Penelusuran transaksi keuangan mencurigakan yang mengalir ke rekening konsorsium pelaksana.',
+      content: 'Temuan baru mengungkapkan skema pengalihan dana proyek infrastruktur ke perusahaan cangkang...',
+      category: 'BONGKAR',
+      imageUrl: 'https://sinpo.id/storage/2026/08/bongkar-infrastruktur.jpg',
+      date: '3 Jam yang lalu',
+      author: 'Tim BONGKAR SinPo',
+      readTime: '5 Menit Baca',
+      tags: ['BONGKAR', 'INVESTIGASI'],
+      comments: [],
+      isHero: false
+    }
+  ], []);
+
+  // Dedicated Fallback Articles specifically for SIN PO DULU category
+  const FALLBACK_SINPO_DULU_ARTICLES: Article[] = useMemo(() => [
+    {
+      id: 'sinpo-dulu-1',
+      slug: 'sin-po-dulu-sejarah-surat-kabar-sin-po-1910',
+      title: 'SIN PO DULU: Jejak Sejarah Koran Sin Po 1910 dalam Perjuangan Kemerdekaan Indonesia',
+      subtitle: 'Mengenang peran sejarah peloporan lagu Indonesia Raya pertama kali dimuat di surat kabar Sin Po.',
+      summary: 'Mengenang peran sejarah peloporan lagu Indonesia Raya pertama kali dimuat di surat kabar Sin Po.',
+      content: 'Surat kabar Sin Po yang terbit awal abad ke-20 menjadi saksi sejarah penting perjuangan bangsa...',
+      category: 'SIN PO DULU',
+      imageUrl: 'https://sinpo.id/storage/2026/08/sinpo-dulu-sejarah.jpg',
+      date: 'Kemarin',
+      author: 'Redaksi SinPo Dulu',
+      readTime: '5 Menit Baca',
+      tags: ['SIN PO DULU', 'SEJARAH', 'ARSIP'],
+      comments: [],
+      isHero: false
+    },
+    {
+      id: 'sin-po-dulu-2',
+      slug: 'sin-po-dulu-arsip-foto-jakarta-tempo-doeloe',
+      title: 'SIN PO DULU: Menengok Arsip Foto Eksklusif Wajah Jakarta Tempo Doeloe',
+      subtitle: 'Koleksi dokumentasi langka suasana ibu kota masa lampau dari ruang arsip Sin Po.',
+      summary: 'Koleksi dokumentasi langka suasana ibu kota masa lampau dari ruang arsip Sin Po.',
+      content: 'Potret kehidupan masyarakat dan arsitektur kota Jakarta abad lalu terekam dalam arsip langka...',
+      category: 'SIN PO DULU',
+      imageUrl: 'https://sinpo.id/storage/2026/08/sinpo-dulu-jakarta.jpg',
+      date: '2 Hari yang lalu',
+      author: 'Redaksi SinPo Dulu',
+      readTime: '4 Menit Baca',
+      tags: ['SIN PO DULU', 'ARSIP', 'TEMPO DOELOE'],
+      comments: [],
+      isHero: false
+    }
+  ], []);
+
+  // Fetch dedicated BONGKAR and SIN PO DULU category articles on mount
   useEffect(() => {
-    setVisibleCount(10);
-    setIsLoadingMore(false);
-  }, [articles]);
+    let isMounted = true;
+    async function fetchBannerArticles() {
+      try {
+        const resBongkar = await apiFetch('/berita?channel=21&limit=15');
+        if (isMounted && resBongkar.success && Array.isArray(resBongkar.data) && resBongkar.data.length > 0) {
+          const mapped = resBongkar.data.map(transformLaravelPostToArticle);
+          mapped.forEach(a => a.category = 'BONGKAR');
+          setBongkarArticles(mapped);
+        }
+      } catch (err) {
+        console.log('Bongkar category fetch notice:', err);
+      }
 
-  const bongkarItem = useMemo(() => {
-    if (!articles || articles.length === 0) return null;
-    return articles.find(a => a.category.toUpperCase() === 'BONGKAR' || a.isInvestigative) || articles[0];
-  }, [articles]);
+      try {
+        const resSinpoDulu = await apiFetch('/berita?channel=24&limit=15');
+        if (isMounted && resSinpoDulu.success && Array.isArray(resSinpoDulu.data) && resSinpoDulu.data.length > 0) {
+          const mapped = resSinpoDulu.data.map(transformLaravelPostToArticle);
+          mapped.forEach(a => a.category = 'SIN PO DULU');
+          setSinpoDuluArticles(mapped);
+        }
+      } catch (err) {
+        console.log('Sin Po Dulu category fetch notice:', err);
+      }
+    }
 
-  const sinpoDuluItem = useMemo(() => {
-    if (!articles || articles.length === 0) return null;
-    return articles.find(a => a.category.toUpperCase() === 'SIN PO DULU') || articles[1] || articles[0];
-  }, [articles]);
+    fetchBannerArticles();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Strictly filter articles for BONGKAR ONLY (never show general politics/law news)
+  const activeBongkarList = useMemo(() => {
+    if (bongkarArticles.length > 0) return bongkarArticles;
+    const match = articles.filter(a => a.category.toUpperCase() === 'BONGKAR' || a.isInvestigative);
+    return match.length > 0 ? match : FALLBACK_BONGKAR_ARTICLES;
+  }, [bongkarArticles, articles, FALLBACK_BONGKAR_ARTICLES]);
+
+  // Strictly filter articles for SIN PO DULU ONLY (never show general politics/law news)
+  const activeSinpoDuluList = useMemo(() => {
+    if (sinpoDuluArticles.length > 0) return sinpoDuluArticles;
+    const match = articles.filter(a => 
+      a.category.toUpperCase().includes('SIN PO DULU') || 
+      a.category.toUpperCase().includes('SINPO DULU') ||
+      a.category.toUpperCase().includes('DULU')
+    );
+    return match.length > 0 ? match : FALLBACK_SINPO_DULU_ARTICLES;
+  }, [sinpoDuluArticles, articles, FALLBACK_SINPO_DULU_ARTICLES]);
+
+  // Current item based on shuffle index
+  const bongkarItem = activeBongkarList[bongkarIdx % activeBongkarList.length] || null;
+  const sinpoDuluItem = activeSinpoDuluList[sinpoDuluIdx % activeSinpoDuluList.length] || null;
+
+  // Single refresh button rotates both banners to next articles seamlessly
+  const handleRefreshBoth = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBongkarIdx(prev => prev + 1);
+    setSinpoDuluIdx(prev => prev + 1);
+  };
+
+  // Check if article was published within 24 hours (not "Kemarin" or "X Hari yang lalu")
+  const isWithin24Hours = (dateStr: string): boolean => {
+    if (!dateStr) return true;
+    const str = String(dateStr).trim();
+    if (str.includes('Hari yang lalu') || str === 'Kemarin') {
+      return false;
+    }
+    if (str.includes('Jam yang lalu')) {
+      const hrs = parseInt(str, 10) || 0;
+      return hrs <= 24;
+    }
+    return true;
+  };
 
   const allBeritaLainnya = useMemo(() => {
-    if (articles.length > 7) {
-      return articles.slice(7);
-    }
-    return [];
+    const list = articles.length > 7 ? articles.slice(7) : articles;
+    return list.filter(art => isWithin24Hours(art.date));
   }, [articles]);
 
   const displayArticles = useMemo(() => {
@@ -47,7 +185,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
     setTimeout(() => {
       setVisibleCount(prev => prev + 10);
       setIsLoadingMore(false);
-    }, 600);
+    }, 400);
   };
 
   if (isLoading) {
@@ -109,12 +247,12 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
 
   return (
     <div id="bongkar-section" className="mt-8 grid grid-cols-1 md:grid-cols-[350px_1fr] gap-8 items-start w-full">
-      {/* Left Column: BONGKAR BANNER */}
+      {/* Left Column: BONGKAR & SIN PO DULU BANNER */}
       <div 
         className="hidden md:flex w-full md:sticky md:top-20 bg-slate-900 text-white rounded-[5px] border-[3px] border-brand-red-600 dark:border-brand-red-500 shadow-xl p-5 flex-col gap-4 relative overflow-hidden select-none"
         style={{ minHeight: '600px' }}
       >
-        {/* Header */}
+        {/* BONGKAR Header */}
         <div className="flex items-center justify-between border-b-2 border-brand-red-600/40 pb-2 mb-1">
           <div className="flex flex-col">
             <h2 className="font-sans text-3xl font-extrabold tracking-tighter text-brand-red-600 dark:text-brand-red-500 mt-1 leading-none">
@@ -122,9 +260,9 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
             </h2>
           </div>
           
-          {/* Circle Refresh Button */}
+          {/* Circle Refresh Button (Rotates Bongkar & Sin Po Dulu articles) */}
           <button
-            onClick={() => setRefreshKey(prev => prev + 1)}
+            onClick={handleRefreshBoth}
             className="w-8 h-8 rounded-full bg-brand-red-600 hover:bg-brand-red-700 text-white flex items-center justify-center cursor-pointer transition-all duration-300 hover:rotate-180 active:scale-90 shadow-md"
             title="Segarkan Tampilan"
           >
@@ -135,17 +273,22 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
         {/* Animated BONGKAR item */}
         <AnimatePresence mode="wait">
           <motion.div
-            key={`bongkar-${refreshKey}`}
+            key={`bongkar-${bongkarIdx}`}
             initial={{ scale: 0.93, opacity: 0, y: 12 }}
             animate={{ scale: [0.93, 1.03, 1], opacity: 1, y: 0 }}
             exit={{ scale: 0.93, opacity: 0, y: -12 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col gap-4 justify-center"
           >
-            {/* 1. BONGKAR Item */}
+            {/* 1. BONGKAR Item ONLY */}
             {bongkarItem && (
-              <div
-                onClick={() => onSelectArticle(bongkarItem)}
+              <a
+                href={`?article=${encodeURIComponent(bongkarItem.slug || bongkarItem.id)}`}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  onSelectArticle(bongkarItem);
+                }}
                 className="group cursor-pointer flex flex-col gap-2 transition-all duration-300 py-1"
               >
                 {/* Landscape Image */}
@@ -163,7 +306,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
                 <h4 className="font-sans text-xs md:text-sm font-bold text-slate-200 group-hover:text-brand-red-500 transition-colors leading-snug line-clamp-2">
                   {bongkarItem.title}
                 </h4>
-              </div>
+              </a>
             )}
           </motion.div>
         </AnimatePresence>
@@ -180,17 +323,22 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
         {/* Animated SIN PO DULU item */}
         <AnimatePresence mode="wait">
           <motion.div
-            key={`sinpodulu-${refreshKey}`}
+            key={`sinpodulu-${sinpoDuluIdx}`}
             initial={{ scale: 0.93, opacity: 0, y: 12 }}
             animate={{ scale: [0.93, 1.03, 1], opacity: 1, y: 0 }}
             exit={{ scale: 0.93, opacity: 0, y: -12 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="flex-1 flex flex-col gap-4 justify-center"
           >
-            {/* 2. SIN PO DULU Item */}
+            {/* 2. SIN PO DULU Item ONLY */}
             {sinpoDuluItem && (
-              <div
-                onClick={() => onSelectArticle(sinpoDuluItem)}
+              <a
+                href={`?article=${encodeURIComponent(sinpoDuluItem.slug || sinpoDuluItem.id)}`}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  onSelectArticle(sinpoDuluItem);
+                }}
                 className="group cursor-pointer flex flex-col gap-2 transition-all duration-300 py-1"
               >
                 {/* Landscape Image */}
@@ -208,7 +356,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
                 <h4 className="font-sans text-xs md:text-sm font-bold text-slate-200 group-hover:text-brand-red-500 transition-colors leading-snug line-clamp-2">
                   {sinpoDuluItem.title}
                 </h4>
-              </div>
+              </a>
             )}
           </motion.div>
         </AnimatePresence>
@@ -223,9 +371,14 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
         </div>
         <div className="flex flex-col">
           {displayArticles.map((article) => (
-            <article
+            <a
               key={`other-${article.id}`}
-              onClick={() => onSelectArticle(article)}
+              href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onSelectArticle(article);
+              }}
               className="group flex flex-row gap-4 py-4 border-b border-slate-200 dark:border-slate-800 cursor-pointer bg-transparent last:border-b-0"
             >
               {/* Left Side: Image */}
@@ -261,13 +414,13 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
                   </span>
                 </div>
               </div>
-            </article>
+            </a>
           ))}
         </div>
 
         {/* Muat Lebih Banyak Button */}
         <div className="mt-4 flex justify-center">
-          {allBeritaLainnya.length > visibleCount && (
+          {visibleCount < allBeritaLainnya.length ? (
             isLoadingMore ? (
               <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-sans text-xs font-bold uppercase tracking-wider py-2">
                 <Loader2 className="h-4.5 w-4.5 animate-spin text-brand-red-600 dark:text-red-500" />
@@ -280,6 +433,12 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
               >
                 Muat Lebih Banyak
               </button>
+            )
+          ) : (
+            allBeritaLainnya.length > 0 && (
+              <p className="text-[11px] font-sans font-medium text-slate-400 dark:text-slate-500 py-2 italic">
+                Telah menampilkan seluruh berita 24 jam terakhir.
+              </p>
             )
           )}
         </div>

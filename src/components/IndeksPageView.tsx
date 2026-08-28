@@ -370,9 +370,14 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       ) : (
         <div className="flex flex-col">
           {filteredAndSortedArticles.slice(0, visibleCount).map((art) => (
-            <article
+            <a
               key={art.id}
-              onClick={() => onSelectArticle(art)}
+              href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+              onClick={(e) => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                onSelectArticle(art);
+              }}
               className="group flex flex-row gap-4 py-5 px-0 border-b border-slate-200 dark:border-slate-800/60 last:border-b-0 transition-all cursor-pointer text-left"
             >
               {/* Image Frame */}
@@ -405,7 +410,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
                   <span className="shrink-0">{art.date}</span>
                 </div>
               </div>
-            </article>
+            </a>
           ))}
 
           {/* Load More Button matching search results styling */}
