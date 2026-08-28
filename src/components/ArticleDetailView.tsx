@@ -21,7 +21,7 @@ interface ArticleDetailViewProps {
 }
 
 import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
-import { apiFetch, isTakedownArticle, incrementArticleViewCounter } from '../lib/apiClient';
+import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter } from '../lib/apiClient';
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
@@ -158,18 +158,20 @@ export default function ArticleDetailView({
   // Initial fetch + 30s real-time polling (matching sinpo 2 startArticlePolling)
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
-    setIsArticleNotFound(false);
     let isMounted = true;
+
+    // Immediately block scheduled / takedown articles without incrementing counter
+    if (isTakedownArticle(article) || isScheduledArticle(article)) {
+      setIsArticleNotFound(true);
+      return;
+    }
+
+    setIsArticleNotFound(false);
 
     const rawId = article.id.replace('laravel-', '');
     const targetIdOrSlug = (article as any).slug || rawId;
 
-    // Trigger counter increment on CMS backend via /counter.php (matching sinpo 2 updateArticleCounter)
-    incrementArticleViewCounter(article.id).then((newCount) => {
-      if (isMounted && newCount && newCount > 0) {
-        setLiveViews((prev) => Math.max(prev ?? 0, newCount));
-      }
-    });
+    let hasIncrementedCounter = false;
 
     // Core fetch function — used for initial load and polling
     async function fetchArticleDetail(isInitial: boolean = false) {
@@ -181,9 +183,22 @@ export default function ArticleDetailView({
           const detailData = res.data as any;
 
           // Check takedown / scheduled status from raw API data
-          if (isTakedownArticle(detailData)) {
+          if (isTakedownArticle(detailData) || isScheduledArticle(detailData)) {
             setIsArticleNotFound(true);
             return;
+          }
+
+          // Article is valid and live!
+          setIsArticleNotFound(false);
+
+          // Trigger view counter increment ONLY for valid, live published articles (once per mount)
+          if (isInitial && !hasIncrementedCounter) {
+            hasIncrementedCounter = true;
+            incrementArticleViewCounter(article.id).then((newCount) => {
+              if (isMounted && newCount && newCount > 0) {
+                setLiveViews((prev) => Math.max(prev ?? 0, newCount));
+              }
+            });
           }
 
           // 1. View counter — always take the highest value (matching sinpo 2 logic)
@@ -214,7 +229,7 @@ export default function ArticleDetailView({
       }
     }
 
-    // Initial fetch (triggers view count increment on API backend)
+    // Initial fetch (triggers view count increment on API backend ONLY if article is live)
     fetchArticleDetail(true);
 
     // 30-second real-time polling (matching sinpo 2 articlePollingInterval = 30000)
