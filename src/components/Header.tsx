@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import gsap from 'gsap';
 import { Article } from '../types';
 import Logo from './Logo';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface HeaderProps {
   bookmarkCount: number;
@@ -170,7 +171,7 @@ export default function Header({
                       {filteredLiveArticles.map((art) => (
                         <a
                           key={art.id}
-                          href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                          href={getArticleUrl(art)}
                           onClick={(e) => {
                             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                             e.preventDefault();
@@ -179,7 +180,7 @@ export default function Header({
                             }
                             setShowMobileSearchInput(false);
                           }}
-                          className="flex items-center gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left cursor-pointer"
+                          className="flex flex-row items-center gap-3 p-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-[4px] transition-colors cursor-pointer group text-left"
                         >
                           {art.imageUrl && (
                             <img 
@@ -427,7 +428,7 @@ export default function Header({
                     {articles && articles.slice(0, 5).map((art) => (
                       <a
                         key={art.id}
-                        href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                        href={getArticleUrl(art)}
                         onClick={(e) => {
                           if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                           e.preventDefault();

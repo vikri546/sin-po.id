@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { apiFetch, transformLaravelPostToArticle } from '../lib/apiClient';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface SidebarProps {
   onSelectPopular: (popularId: string) => void;
@@ -146,7 +147,7 @@ export default function Sidebar({
                 if (!bongkarArticle) return null;
                 return (
                   <a
-                    href={`?article=${encodeURIComponent(bongkarArticle.slug || bongkarArticle.id)}`}
+                    href={getArticleUrl(bongkarArticle)}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                       e.preventDefault();
@@ -196,7 +197,7 @@ export default function Sidebar({
                 if (!sinpoDuluArticle) return null;
                 return (
                   <a
-                    href={`?article=${encodeURIComponent(sinpoDuluArticle.slug || sinpoDuluArticle.id)}`}
+                    href={getArticleUrl(sinpoDuluArticle)}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                       e.preventDefault();
@@ -254,7 +255,7 @@ export default function Sidebar({
             return listToRender.map((pop, index) => {
               const numStr = String(index + 1).padStart(2, '0');
               const imageUrl = pop.imageUrl || "https://images.unsplash.com/photo-1541872703-74c5e44368f9?auto=format&fit=crop&w=800&q=80";
-              const targetUrl = `?article=${encodeURIComponent(pop.slug || pop.id)}`;
+              const targetUrl = getArticleUrl(pop);
 
               const handleClick = (e: React.MouseEvent) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;

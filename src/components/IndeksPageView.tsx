@@ -3,6 +3,7 @@ import { Calendar, X, Loader2, Search, Filter } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { parseAnyDate } from '../lib/dateFormatter';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface IndeksPageViewProps {
   articles: Article[];
@@ -372,7 +373,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
           {filteredAndSortedArticles.slice(0, visibleCount).map((art) => (
             <a
               key={art.id}
-              href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+              href={getArticleUrl(art)}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface HukumPolitikSectionProps {
   articles: Article[];
@@ -94,7 +95,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
               hukumArticles.map((article) => (
                 <a
                   key={`hukum-${article.id}`}
-                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  href={getArticleUrl(article)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();
@@ -151,7 +152,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
               politikArticles.map((article) => (
                 <a
                   key={`politik-${article.id}`}
-                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  href={getArticleUrl(article)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { apiFetch, transformLaravelPostToArticle } from '../lib/apiClient';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface BongkarSectionProps {
   articles: Article[];
@@ -283,7 +284,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
             {/* 1. BONGKAR Item ONLY */}
             {bongkarItem && (
               <a
-                href={`?article=${encodeURIComponent(bongkarItem.slug || bongkarItem.id)}`}
+                href={getArticleUrl(bongkarItem)}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();
@@ -333,7 +334,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
             {/* 2. SIN PO DULU Item ONLY */}
             {sinpoDuluItem && (
               <a
-                href={`?article=${encodeURIComponent(sinpoDuluItem.slug || sinpoDuluItem.id)}`}
+                href={getArticleUrl(sinpoDuluItem)}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();
@@ -373,7 +374,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
           {displayArticles.map((article) => (
             <a
               key={`other-${article.id}`}
-              href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+              href={getArticleUrl(article)}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();

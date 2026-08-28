@@ -4,6 +4,7 @@ import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { stripHtml } from '../lib/htmlRenderer';
 import { parseAnyDate } from '../lib/dateFormatter';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface CategoryPageViewProps {
   category: string;
@@ -200,7 +201,7 @@ export default function CategoryPageView({
         <div className="flex flex-col gap-4">
           {col1Article && (
             <a 
-              href={`?article=${encodeURIComponent(col1Article.slug || col1Article.id)}`}
+              href={getArticleUrl(col1Article)}
               onClick={(e) => {
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();
@@ -242,7 +243,7 @@ export default function CategoryPageView({
               col2Articles.map((art) => (
                 <a 
                   key={art.id} 
-                  href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                  href={getArticleUrl(art)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();
@@ -303,7 +304,7 @@ export default function CategoryPageView({
                 {displayedBeritaLainnya.map((art) => (
                   <a
                     key={art.id}
-                    href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                    href={getArticleUrl(art)}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                       e.preventDefault();
@@ -380,7 +381,7 @@ export default function CategoryPageView({
                 {latestNews.map((art) => (
                   <a
                     key={art.id}
-                    href={`?article=${encodeURIComponent(art.slug || art.id)}`}
+                    href={getArticleUrl(art)}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                       e.preventDefault();

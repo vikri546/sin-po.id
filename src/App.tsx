@@ -20,6 +20,7 @@ import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './li
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
 import StaticPageView from './components/StaticPageView';
+import { getArticleUrl, getNumericId, getArticleSlug } from './lib/urlHelpers';
 
 // Resolve the correct channel ID from the channels list for API queries (matching sinpo 2 reference)
 function resolveChannelId(categoryName: string, channels: any[]): number | null {
@@ -541,7 +542,7 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'auto' });
 
       if (!skipPushState && typeof window !== 'undefined') {
-        const url = `?article=${encodeURIComponent(article.slug || article.id)}`;
+        const url = getArticleUrl(article);
         window.history.pushState({ type: 'article', id: article.id }, '', url);
       }
       finishLoading(500);
@@ -636,48 +637,73 @@ export default function App() {
     finishLoading(500);
   };
 
-  // Handle Browser Back / Forward (popstate) event with smooth loading skeleton
+  const parseArticleTargetFromUrl = useCallback((): string | null => {
+    if (typeof window === 'undefined') return null;
+
+    const pathname = window.location.pathname;
+    const detailMatch = pathname.match(/^\/detail\/([^\/]+)/);
+    if (detailMatch && detailMatch[1]) {
+      return detailMatch[1];
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const articleParam = params.get('article');
+    if (articleParam) {
+      return articleParam;
+    }
+
+    return null;
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const handlePopState = () => {
-      // Always trigger smooth loading skeleton transition on browser back/forward navigation
       triggerLoading(500);
 
+      const targetArticleIdOrSlug = parseArticleTargetFromUrl();
       const params = new URLSearchParams(window.location.search);
-      const articleParam = params.get('article');
       const categoryParam = params.get('category');
       const searchParam = params.get('q');
       const tagParam = params.get('tag');
       const pageParam = params.get('page');
 
-      if (articleParam) {
+      if (targetArticleIdOrSlug) {
         setStaticModalSlug(null);
+        const cleanId = getNumericId(targetArticleIdOrSlug);
         const pool = masterLiveArticlesRef.current.length > 0 
           ? masterLiveArticlesRef.current 
           : (masterLiveArticles.length > 0 ? masterLiveArticles : articlesState);
         
-        const cleanIdOrSlug = articleParam.replace('laravel-', '');
-        const matched = pool.find((a) => a.id === articleParam || a.id === `laravel-${cleanIdOrSlug}` || a.slug === articleParam || a.slug === cleanIdOrSlug);
+        const matched = pool.find((a) => {
+          const aNumId = getNumericId(a.id);
+          return aNumId === cleanId || a.id === targetArticleIdOrSlug || a.id === `laravel-${cleanId}` || a.slug === targetArticleIdOrSlug;
+        });
         
         if (matched) {
           setSelectedArticle(matched);
           window.scrollTo({ top: 0, behavior: 'auto' });
+          const cleanUrl = getArticleUrl(matched);
+          if (window.location.search.includes('article=')) {
+            window.history.replaceState({ type: 'article', id: matched.id }, '', cleanUrl);
+          }
           finishLoading(500);
         } else {
-          apiFetch(`/berita/${encodeURIComponent(cleanIdOrSlug)}`)
+          apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
             .then((res) => {
-              if (res.success && res.data) {
+              if (res.success && res.data && !isTakedownArticle(res.data)) {
                 const art = transformLaravelPostToArticle(res.data);
                 setSelectedArticle(art);
                 window.scrollTo({ top: 0, behavior: 'auto' });
+                const cleanUrl = getArticleUrl(art);
+                window.history.replaceState({ type: 'article', id: art.id }, '', cleanUrl);
               } else {
-                setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+                setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
               }
               finishLoading(500);
             })
             .catch(() => {
-              setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+              setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
               finishLoading(500);
             });
         }
@@ -716,33 +742,37 @@ export default function App() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles]);
+  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl]);
 
-  // Initial URL Parameter sync on startup
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const targetArticleIdOrSlug = parseArticleTargetFromUrl();
     const params = new URLSearchParams(window.location.search);
     const categoryParam = params.get('category');
-    const articleParam = params.get('article');
     const searchParam = params.get('q');
     const tagParam = params.get('tag');
     const pageParam = params.get('page');
 
-    if (articleParam) {
+    if (targetArticleIdOrSlug) {
       triggerLoading(500);
-      const cleanIdOrSlug = articleParam.replace('laravel-', '');
-      apiFetch(`/berita/${encodeURIComponent(cleanIdOrSlug)}`)
+      const cleanId = getNumericId(targetArticleIdOrSlug);
+      apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
         .then((res) => {
-          if (res.success && res.data) {
-            setSelectedArticle(transformLaravelPostToArticle(res.data));
+          if (res.success && res.data && !isTakedownArticle(res.data)) {
+            const art = transformLaravelPostToArticle(res.data);
+            setSelectedArticle(art);
+            const cleanUrl = getArticleUrl(art);
+            if (window.location.pathname !== cleanUrl) {
+              window.history.replaceState({ type: 'article', id: art.id }, '', cleanUrl);
+            }
           } else {
-            setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+            setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           }
           finishLoading(500);
         })
         .catch(() => {
-          setSelectedArticle(transformLaravelPostToArticle({ id: articleParam, judul: 'Berita Tidak Ditemukan' }));
+          setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           finishLoading(500);
         });
     } else if (pageParam) {
@@ -755,9 +785,8 @@ export default function App() {
     } else if (tagParam) {
       setSelectedTag(tagParam.trim());
     }
-  }, [triggerLoading, finishLoading]);
+  }, [triggerLoading, finishLoading, parseArticleTargetFromUrl]);
 
-  // User's own comments list for deletion permission
   const [myCommentIds, setMyCommentIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     const saved = localStorage.getItem('sinpo_my_comment_ids_v1');

@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Article } from '../types';
 import { apiFetch, transformLaravelPostToArticle } from '../lib/apiClient';
 import { stripHtml } from '../lib/htmlRenderer';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface TickerItem {
   text: string;
@@ -153,7 +154,7 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
             {/* Track 1 */}
             <div className="flex shrink-0">
               {newsItems.map((item, idx) => {
-                const url = item.article ? `?article=${encodeURIComponent(item.article.slug || item.article.id)}` : '#';
+                const url = item.article ? getArticleUrl(item.article) : '#';
                 return (
                   <a
                     key={`t1-${idx}`}
@@ -174,7 +175,7 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
             {/* Track 2 (seamless clone) */}
             <div className="flex shrink-0">
               {newsItems.map((item, idx) => {
-                const url = item.article ? `?article=${encodeURIComponent(item.article.slug || item.article.id)}` : '#';
+                const url = item.article ? getArticleUrl(item.article) : '#';
                 return (
                   <a
                     key={`t2-${idx}`}

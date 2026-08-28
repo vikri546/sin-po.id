@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface ArticleDetailViewProps {
   article: Article;
@@ -713,7 +714,7 @@ export default function ArticleDetailView({
                   return (
                     <a
                       key={related.id}
-                      href={`?article=${encodeURIComponent(related.slug || related.id)}`}
+                      href={getArticleUrl(related)}
                       onClick={(e) => {
                         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                         e.preventDefault();
@@ -778,7 +779,7 @@ export default function ArticleDetailView({
                   <a
                     key={latest.id}
                     id={`article-detail-latest-card-${latest.id}`}
-                    href={`?article=${encodeURIComponent(latest.slug || latest.id)}`}
+                    href={getArticleUrl(latest)}
                     onClick={(e) => {
                       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                       e.preventDefault();

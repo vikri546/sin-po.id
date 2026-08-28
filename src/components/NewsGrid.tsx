@@ -4,6 +4,7 @@ import { Bookmark, Clock, User, ArrowRight, Eye, Calendar } from 'lucide-react';
 import { Article } from '../types';
 import { POPULAR_NEWS } from '../data/newsData';
 import Skeleton from './skeletons/Skeleton';
+import { getArticleUrl } from '@/lib/urlHelpers';
 
 interface NewsGridProps {
   articles: Article[];
@@ -188,7 +189,7 @@ export default function NewsGrid({
       {heroArticle && (
         <a
           id={`hero-showcase-${heroArticle.id}`}
-          href={`?article=${encodeURIComponent(heroArticle.slug || heroArticle.id)}`}
+          href={getArticleUrl(heroArticle)}
           className="group relative block rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-300"
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
@@ -280,7 +281,7 @@ export default function NewsGrid({
               return (
                 <a
                   key={pop.id}
-                  href={`?article=${encodeURIComponent(pop.slug || pop.id)}`}
+                  href={getArticleUrl(pop)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();
@@ -326,7 +327,7 @@ export default function NewsGrid({
                 <a
                   key={article.id}
                   id={`article-card-${article.id}`}
-                  href={`?article=${encodeURIComponent(article.slug || article.id)}`}
+                  href={getArticleUrl(article)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                     e.preventDefault();
