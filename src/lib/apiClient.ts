@@ -121,11 +121,15 @@ export async function incrementArticleViewCounter(articleId: string | number): P
 export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031]);
 
 /**
- * Parse publish date from raw article data for schedule checking
+ * Parse publish date from raw article data or transformed Article object for schedule checking
  * (Matching sinpo 2 parseArticlePublishDate)
  */
 export function parseArticlePublishDate(articleOrId: any): Date | null {
   if (!articleOrId || typeof articleOrId !== 'object') return null;
+
+  if (typeof articleOrId.publishedAtMs === 'number' && articleOrId.publishedAtMs > 0) {
+    return new Date(articleOrId.publishedAtMs);
+  }
 
   const dateVal = articleOrId.published_at || articleOrId.tanggal_tayang || articleOrId.created_at;
   const timeVal = articleOrId.waktu;
@@ -160,34 +164,43 @@ export function parseArticlePublishDate(articleOrId: any): Date | null {
 }
 
 /**
- * Check if article is scheduled for future publish
+ * Check if article is scheduled for future publish or accelerated schedule by redaksi
  * (Matching sinpo 2 isScheduledArticle)
  */
 export function isScheduledArticle(articleOrId: any): boolean {
   if (!articleOrId || typeof articleOrId !== 'object') return false;
 
-  // Check explicit scheduled publish status flags
-  if (articleOrId.publish !== undefined && articleOrId.publish !== null) {
-    const pubStr = String(articleOrId.publish).toLowerCase().trim();
-    if (pubStr === '2' || pubStr === 'scheduled' || pubStr === 'jadwal' || pubStr === 'terjadwal') {
-      return true;
-    }
-  }
-  if (articleOrId.status !== undefined && articleOrId.status !== null) {
-    const statStr = String(articleOrId.status).toLowerCase().trim();
-    if (statStr === '2' || statStr === 'scheduled' || statStr === 'jadwal' || statStr === 'terjadwal') {
-      return true;
-    }
-  }
-  if (articleOrId.is_scheduled === true || articleOrId.scheduled === true) {
+  const pubStr = articleOrId.publish !== undefined && articleOrId.publish !== null
+    ? String(articleOrId.publish).toLowerCase().trim()
+    : '';
+  const statStr = articleOrId.status !== undefined && articleOrId.status !== null
+    ? String(articleOrId.status).toLowerCase().trim()
+    : '';
+
+  // Explicit scheduled status flags from CMS
+  if (
+    pubStr === '2' || pubStr === 'scheduled' || pubStr === 'jadwal' || pubStr === 'terjadwal' ||
+    statStr === '2' || statStr === 'scheduled' || statStr === 'jadwal' || statStr === 'terjadwal' ||
+    articleOrId.is_scheduled === true || articleOrId.scheduled === true
+  ) {
     return true;
   }
 
-  // Check future publish timestamp according to CMS rules
+  // If status is explicitly unpublished (0), it is takedown, not scheduled
+  if (pubStr === '0' || statStr === '0') {
+    return false;
+  }
+
+  // Check future publish timestamp
   const pubDate = parseArticlePublishDate(articleOrId);
   if (pubDate) {
-    const now = new Date();
-    if (pubDate.getTime() > now.getTime() + 5000) {
+    const now = Date.now();
+    // If publish date is in future by more than 5 seconds, it's scheduled
+    if (pubDate.getTime() > now + 5000) {
+      // If publish status is explicitly 1 (published) and date is within 5 minutes (redaksi accelerated publish)
+      if (pubStr === '1' && pubDate.getTime() <= now + 300000) {
+        return false;
+      }
       return true;
     }
   }
@@ -196,7 +209,7 @@ export function isScheduledArticle(articleOrId: any): boolean {
 }
 
 /**
- * Check if article is taken down or should not be displayed
+ * Check if article is taken down or scheduled (not live yet)
  * (Matching sinpo 2 isTakedownArticle)
  */
 export function isTakedownArticle(articleOrId: any): boolean {
