@@ -2,6 +2,7 @@ import { ApiResponse } from '@/types/api';
 import { Article } from '@/types';
 import { stripHtml } from './htmlRenderer';
 import { formatRelativeDate, parseAnyDate } from './dateFormatter';
+import { getNumericId } from './urlHelpers';
 
 const getApiBaseUrl = () => {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -85,6 +86,32 @@ export async function apiFetch<T = any>(
     console.warn(`apiFetch notice [${cleanEndpoint}]:`, err?.message || err);
     throw err;
   }
+}
+
+/**
+ * Triggers counter increment for an article via /counter.php
+ * (Matching sinpo 2 updateArticleCounter)
+ */
+export async function incrementArticleViewCounter(articleId: string | number): Promise<number | null> {
+  const numericId = getNumericId(String(articleId));
+  if (!numericId) return null;
+
+  try {
+    const res = await fetch('https://sinpo.id/counter.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_berita: Number(numericId) }),
+    });
+    if (!res.ok) return null;
+    const result = await res.json();
+    if (result && result.success && result.counter !== undefined) {
+      const count = Number(result.counter);
+      return !isNaN(count) && count > 0 ? count : null;
+    }
+  } catch (err) {
+    console.warn('Counter update notice:', err);
+  }
+  return null;
 }
 
 // ==========================================

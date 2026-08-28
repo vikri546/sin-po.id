@@ -21,7 +21,7 @@ interface ArticleDetailViewProps {
 }
 
 import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
-import { apiFetch, isTakedownArticle } from '../lib/apiClient';
+import { apiFetch, isTakedownArticle, incrementArticleViewCounter } from '../lib/apiClient';
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
@@ -163,6 +163,13 @@ export default function ArticleDetailView({
 
     const rawId = article.id.replace('laravel-', '');
     const targetIdOrSlug = (article as any).slug || rawId;
+
+    // Trigger counter increment on CMS backend via /counter.php (matching sinpo 2 updateArticleCounter)
+    incrementArticleViewCounter(article.id).then((newCount) => {
+      if (isMounted && newCount && newCount > 0) {
+        setLiveViews((prev) => Math.max(prev ?? 0, newCount));
+      }
+    });
 
     // Core fetch function — used for initial load and polling
     async function fetchArticleDetail(isInitial: boolean = false) {
