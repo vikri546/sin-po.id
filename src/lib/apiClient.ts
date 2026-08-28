@@ -138,22 +138,24 @@ export function parseArticlePublishDate(articleOrId: any): Date | null {
 
   try {
     let dateStr = String(dateVal).trim();
-    if (dateStr.includes('T')) {
-      const parts = dateStr.split('T');
-      const dPart = parts[0];
-      let tPart = parts[1];
-      if (timeVal && typeof timeVal === 'string' && !tPart.includes('Z')) {
-        tPart = timeVal;
+    let dPart = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr.split(' ')[0];
+
+    let tPart = '00:00:00';
+    if (timeVal && typeof timeVal === 'string' && timeVal.trim() !== '') {
+      tPart = timeVal.trim();
+      if (tPart.length === 5) tPart += ':00';
+    } else if (dateStr.includes('T')) {
+      const rawTime = dateStr.split('T')[1].replace('.000000Z', '').replace('Z', '');
+      if (rawTime && rawTime !== '00:00:00') {
+        tPart = rawTime;
       }
-      dateStr = `${dPart}T${tPart}`;
     } else if (dateStr.includes(' ')) {
-      const [dPart, tPart] = dateStr.split(' ');
-      dateStr = `${dPart}T${timeVal || tPart}`;
-    } else if (timeVal && typeof timeVal === 'string') {
-      dateStr = `${dateStr}T${timeVal}`;
+      const rawTime = dateStr.split(' ')[1];
+      if (rawTime) tPart = rawTime;
     }
 
-    const parsedDate = new Date(dateStr);
+    const fullIso = `${dPart}T${tPart}+07:00`;
+    const parsedDate = new Date(fullIso);
     if (!isNaN(parsedDate.getTime())) {
       return parsedDate;
     }
@@ -191,16 +193,12 @@ export function isScheduledArticle(articleOrId: any): boolean {
     return false;
   }
 
-  // Check future publish timestamp
+  // Check future publish timestamp (combining tanggal_tayang + waktu)
   const pubDate = parseArticlePublishDate(articleOrId);
   if (pubDate) {
     const now = Date.now();
-    // If publish date is in future by more than 5 seconds, it's scheduled
+    // If publish date/time is in the future by > 5 seconds, it's scheduled (not live yet)
     if (pubDate.getTime() > now + 5000) {
-      // If publish status is explicitly 1 (published) and date is within 5 minutes (redaksi accelerated publish)
-      if (pubStr === '1' && pubDate.getTime() <= now + 300000) {
-        return false;
-      }
       return true;
     }
   }
