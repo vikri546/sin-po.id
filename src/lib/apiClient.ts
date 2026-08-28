@@ -199,15 +199,82 @@ export function isTakedownArticle(articleOrId: any): boolean {
  * Format image URL from backend storage path
  */
 export function getStorageUrl(path?: string | null): string {
-  if (!path) return 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  
-  let cleanPath = path.startsWith('/') ? path.substring(1) : path;
-  if (cleanPath.startsWith('storage/') || cleanPath.startsWith('uploads/')) {
+  if (!path || typeof path !== 'string' || path.trim() === '') {
+    return 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
+  }
+
+  let cleanPath = path.trim();
+
+  // Normalize backend dev/api domain hosts if returned by CMS
+  if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {
+    try {
+      const urlObj = new URL(cleanPath);
+      cleanPath = urlObj.pathname;
+    } catch {
+      cleanPath = cleanPath.replace(/^https?:\/\/[^\/]+/, '');
+    }
+  }
+
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+    return cleanPath;
+  }
+
+  if (cleanPath.startsWith('/')) {
+    cleanPath = cleanPath.substring(1);
+  }
+
+  // Root domain asset paths (storage/, uploads/, gambar/, foto/, asset/, assets/)
+  if (
+    cleanPath.startsWith('storage/') ||
+    cleanPath.startsWith('uploads/') ||
+    cleanPath.startsWith('gambar/') ||
+    cleanPath.startsWith('foto/') ||
+    cleanPath.startsWith('asset/') ||
+    cleanPath.startsWith('assets/')
+  ) {
     return `https://sinpo.id/${cleanPath}`;
   }
-  
-  return `${STORAGE_BASE_URL}/${cleanPath}`;
+
+  // Auto-fix bare filenames that lack year/month folder prefix using DDMMYYYY date pattern before timestamp
+  if (!cleanPath.includes('/')) {
+    const dateMatch = cleanPath.match(/(\d{2})(\d{2})(\d{4})-\d+\.(?:jpg|png|jpeg|webp|gif)$/i);
+    if (dateMatch) {
+      const month = dateMatch[2];
+      const year = dateMatch[3];
+      cleanPath = `${year}/${month}/${cleanPath}`;
+    }
+  }
+
+  return `https://sinpo.id/storage/${cleanPath}`;
+}
+
+/**
+ * Fixes relative or broken image src attributes in raw HTML article content
+ * (Matching sinpo 2 fixContentImages algorithm)
+ */
+export function fixContentImages(html?: string | null): string {
+  if (!html) return '';
+  return html.replace(/<img([^>]+)src=["']([^"']+)["']/gi, (match, attrs, src) => {
+    if (!src || src.startsWith('data:')) return match;
+
+    let cleanSrc = src.trim();
+    if (cleanSrc.includes('localhost:8000') || cleanSrc.includes('127.0.0.1:8000') || cleanSrc.includes('api.sinpo.id')) {
+      try {
+        const urlObj = new URL(cleanSrc);
+        cleanSrc = urlObj.pathname;
+      } catch {
+        cleanSrc = cleanSrc.replace(/^https?:\/\/[^\/]+/, '');
+      }
+    }
+
+    let newSrc = cleanSrc;
+    if (!cleanSrc.startsWith('http://') && !cleanSrc.startsWith('https://')) {
+      newSrc = getStorageUrl(cleanSrc);
+    }
+
+    let cleanAttrs = attrs.replace(/\s*onerror=["'][^"']*["']/gi, '');
+    return `<img${cleanAttrs}src="${newSrc}" loading="lazy" onerror="this.onerror=null;this.style.display='none';"`;
+  });
 }
 
 /**
@@ -258,7 +325,7 @@ export function transformLaravelPostToArticle(item: any): Article {
   if (!authorName) authorName = 'Redaksi SinPo';
 
   // Summary & Content resolution
-  const rawContent = item.isi || item.content || '';
+  const rawContent = fixContentImages(item.isi || item.content || '');
   const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || '';
   const cleanSummary = stripHtml(rawSummary) || (rawContent ? stripHtml(rawContent).slice(0, 180) : '');
 

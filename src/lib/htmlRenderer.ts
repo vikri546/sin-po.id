@@ -1,3 +1,5 @@
+import { fixContentImages } from './apiClient';
+
 /**
  * Utility functions for rendering and stripping rich HTML content in SinPo.id
  */
@@ -27,7 +29,8 @@ export function stripHtml(html?: string): string {
 export function formatArticleHtml(content?: string): string {
   if (!content) return '';
 
-  const trimmed = content.trim();
+  const processed = fixContentImages(content);
+  const trimmed = processed.trim();
   if (!trimmed) return '';
 
   // Check if content already contains HTML elements (e.g. <p>, <div>, <strong>, <ul>, <ol>, <img>, <br>, <h2>, etc.)

@@ -490,6 +490,9 @@ export default function ArticleDetailView({
             src={article.imageUrl}
             alt={article.title}
             referrerPolicy="no-referrer"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
+            }}
             className="w-full h-full object-cover rounded-[5px]"
           />
         </div>
