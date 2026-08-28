@@ -307,7 +307,7 @@ export function transformLaravelPostToArticle(item: any): Article {
   const categoryName = stripHtml(categoryNameRaw).toUpperCase() || 'NASIONAL';
 
   // Image resolution
-  const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || '';
+  const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.image_url || item.foto || '';
   const imageUrl = getStorageUrl(rawImage);
 
   // Author resolution
