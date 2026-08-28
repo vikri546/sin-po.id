@@ -914,21 +914,18 @@ export default function App() {
 
   // Handle clicking on popular items in the right sidebar
   const handleSelectPopular = (popularId: string) => {
-    let matched: Article | undefined;
-    if (popularId === "pop-1") {
-      matched = articlesState.find((a) => a.id === "art-1" || a.id === "art-6");
-    } else if (popularId === "pop-2") {
-      matched = articlesState.find((a) => a.id === "art-3");
-    } else if (popularId === "pop-3") {
-      matched = articlesState.find((a) => a.id === "art-4" || a.id === "art-7");
-    } else if (popularId === "pop-4") {
-      matched = articlesState.find((a) => a.id === "art-5");
-    } else if (popularId === "pop-5") {
-      matched = articlesState.find((a) => a.id === "art-2");
-    }
+    const rawId = popularId.replace('laravel-', '');
+    const matched = masterArticlesPool.find((a) => a.id === popularId || a.id === `laravel-${rawId}` || a.id === rawId || (a as any).slug === popularId)
+      || articlesState.find((a) => a.id === popularId || a.id === `laravel-${rawId}` || a.id === rawId || (a as any).slug === popularId);
 
     if (matched) {
       handleSelectArticle(matched);
+    } else if (popularId === "pop-1") {
+      const legacy = articlesState.find((a) => a.id === "art-1" || a.id === "art-6");
+      if (legacy) handleSelectArticle(legacy);
+    } else if (popularId === "pop-2") {
+      const legacy = articlesState.find((a) => a.id === "art-3");
+      if (legacy) handleSelectArticle(legacy);
     } else {
       triggerToast("Artikel terpopuler sedang dimuat...", "info");
     }
@@ -1437,6 +1434,7 @@ export default function App() {
                   onToggleBookmark={handleToggleBookmark}
                   onSelectArticle={handleSelectArticle}
                   selectedCategory={selectedCategory}
+                  popularArticles={popularNewsList}
                   onSelectPopular={handleSelectPopular}
                   isLoading={isLoadingContent}
                 />

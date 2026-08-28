@@ -420,6 +420,17 @@ export function transformLaravelPostToArticle(item: any): Article {
   const captionText = stripHtml(item.caption || item.image_caption || item.caption_gambar || '');
   const isHero = Boolean(item.is_hero || item.is_headline || item.headline === '1' || item.headline === 1);
 
+  // Gallery images resolution (for GALERI / FOTO category multi-image slider)
+  let galleryImages: string[] = [];
+  const rawGallery = item.datagallery || item.datagambar || item.galeri || item.images || item.photos || [];
+  if (Array.isArray(rawGallery) && rawGallery.length > 0) {
+    galleryImages = rawGallery.map((g: any) => {
+      if (typeof g === 'string') return getStorageUrl(g);
+      const photoPath = g.nama_photo || g.foto || g.gambar || g.photo || g.url || g.image || '';
+      return getStorageUrl(photoPath);
+    }).filter(Boolean);
+  }
+
   return {
     id: `laravel-${rawId}`,
     slug: item.slug || '',
@@ -429,6 +440,7 @@ export function transformLaravelPostToArticle(item: any): Article {
     content: rawContent,
     category: categoryName,
     imageUrl,
+    galleryImages: galleryImages.length > 0 ? galleryImages : undefined,
     date: formatRelativeDate(formattedDateStr),
     publishedAtMs: publishedAtMs || parseAnyDate(rawDateVal).getTime() || 0,
     author: authorName,

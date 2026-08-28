@@ -266,51 +266,53 @@ export default function NewsGrid({
         </a>
       )}
 
-      {/* B. Mobile Only: Berita Terpopuler */}
-      {onSelectPopular && (
-        <section id="mobile-popular-news" className="md:hidden bg-white dark:bg-slate-950 p-6 mt-4 rounded-[5px] border border-slate-200 dark:border-slate-800 transition-colors">
-          <div className="flex items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-5">
-            <h3 className="font-sans text-lg font-black tracking-wider text-slate-900 dark:text-white uppercase">
-              BERITA TERPOPULER
-            </h3>
-          </div>
+      {/* B. Mobile Only: Berita Terpopuler (Placed directly after headline news) */}
+      <section id="mobile-popular-news" className="md:hidden bg-white dark:bg-slate-950 p-5 mt-4 rounded-[5px] border border-slate-200 dark:border-slate-800 transition-colors">
+        <div className="flex items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-5">
+          <h3 className="font-sans text-lg font-black tracking-wider text-slate-900 dark:text-white uppercase">
+            BERITA TERPOPULER
+          </h3>
+        </div>
 
-          <div className="flex flex-col gap-4">
-            {(popularArticles && popularArticles.length > 0 ? popularArticles : articles.slice(0, 5)).map((pop, index) => {
-              const numStr = String(index + 1).padStart(2, '0');
-              return (
-                <a
-                  key={pop.id}
-                  href={getArticleUrl(pop)}
-                  onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                    e.preventDefault();
+        <div className="flex flex-col gap-4">
+          {(popularArticles && popularArticles.length > 0 ? popularArticles : articles.slice(0, 5)).slice(0, 5).map((pop, index) => {
+            const numStr = String(index + 1).padStart(2, '0');
+            return (
+              <a
+                key={pop.id}
+                href={getArticleUrl(pop)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  if (onSelectArticle) {
+                    onSelectArticle(pop);
+                  } else if (onSelectPopular) {
                     onSelectPopular(pop.id);
-                  }}
-                  className="flex gap-3 items-start group cursor-pointer border-b border-slate-100 dark:border-slate-900/50 pb-3 last:border-b-0 last:pb-0"
-                >
-                  {/* Large high-contrast red numbers with fixed width for perfect vertical text alignment */}
-                  <span className="font-sans font-extrabold text-3xl text-brand-red-600 tracking-tight leading-none shrink-0 opacity-50 group-hover:opacity-100 transition-opacity select-none w-9 tabular-nums">
-                    {numStr}
-                  </span>
+                  }
+                }}
+                className="flex gap-3 items-start group cursor-pointer border-b border-slate-100 dark:border-slate-900/50 pb-3 last:border-b-0 last:pb-0 active:scale-[0.99] transition-transform"
+              >
+                {/* Large high-contrast red numbers */}
+                <span className="font-sans font-extrabold text-3xl text-brand-red-600 tracking-tight leading-none shrink-0 opacity-50 group-hover:opacity-100 transition-opacity select-none w-9 tabular-nums">
+                  {numStr}
+                </span>
 
-                  <div className="flex flex-col gap-1 min-w-0 flex-1">
-                    <span className="font-sans text-[9px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
-                      {pop.category}
-                    </span>
-                    <h4 className="font-sans text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-brand-red-600 transition-colors">
-                      {pop.title}
-                    </h4>
-                    <span className="font-sans text-[10px] text-slate-400 dark:text-slate-500 font-normal">
-                      {pop.date}
-                    </span>
-                  </div>
-                </a>
-              );
-            })}
-          </div>
-        </section>
-      )}
+                <div className="flex flex-col gap-1 min-w-0 flex-1">
+                  <span className="font-sans text-[9px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+                    {pop.category}
+                  </span>
+                  <h4 className="font-sans text-sm font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-brand-red-600 transition-colors">
+                    {pop.title}
+                  </h4>
+                  <span className="font-sans text-[10px] text-slate-400 dark:text-slate-500 font-normal">
+                    {pop.date}
+                  </span>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      </section>
 
       {/* C. News Grid Stream: Elegant Cards Column */}
       {gridArticles.length > 0 && (

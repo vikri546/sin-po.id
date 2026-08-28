@@ -82,7 +82,7 @@ export default function Sidebar({
         )}
 
         {/* BERITA TERPOPULER Section Skeleton */}
-        <section className="hidden md:block bg-white dark:bg-slate-950 p-6 rounded-[5px] border border-slate-200 dark:border-slate-800">
+        <section className="w-full bg-white dark:bg-slate-950 p-5 md:p-6 rounded-[5px] border border-slate-200 dark:border-slate-800">
           <div className="flex items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-5">
             <Skeleton className="h-6 w-44 rounded-sm" />
           </div>
@@ -225,7 +225,7 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* 1. TERPOPULER (Most Popular List) */}
+      {/* 1. TERPOPULER (Most Popular List - Desktop Only) */}
       <section id="sidebar-popular-news" className="hidden md:block bg-white dark:bg-slate-950 p-6 rounded-[5px] border border-slate-200 dark:border-slate-800 transition-colors">
         <div className="flex items-center border-b border-slate-200 dark:border-slate-800 pb-3 mb-5">
           <h3 className="font-sans text-lg md:text-xl font-black tracking-wider text-slate-900 dark:text-white uppercase">

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
+import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Twitter, Instagram, Linkedin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl } from '@/lib/urlHelpers';
@@ -21,7 +21,7 @@ interface ArticleDetailViewProps {
 }
 
 import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
-import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter } from '../lib/apiClient';
+import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter, getStorageUrl } from '../lib/apiClient';
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
@@ -147,6 +147,29 @@ export default function ArticleDetailView({
   const [isArticleNotFound, setIsArticleNotFound] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Multi-Image Gallery Slider states
+  const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => article.galleryImages || []);
+  const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
+
+  useEffect(() => {
+    if (article.galleryImages && article.galleryImages.length > 0) {
+      setLiveGalleryImages(article.galleryImages);
+    }
+  }, [article.id, article.galleryImages]);
+
+  const allGalleryImages = React.useMemo(() => {
+    const list: string[] = [];
+    if (article.imageUrl && !article.imageUrl.includes('placehold.co')) {
+      list.push(article.imageUrl);
+    }
+    (liveGalleryImages || []).forEach((imgUrl) => {
+      if (imgUrl && !list.includes(imgUrl)) {
+        list.push(imgUrl);
+      }
+    });
+    return list;
+  }, [article.imageUrl, liveGalleryImages]);
+
   // Helper: extract view count from raw API data
   const extractViewCount = (data: any): number => {
     if (typeof data.counter === 'number') return data.counter;
@@ -218,6 +241,19 @@ export default function ArticleDetailView({
           if (!isInitial && detailData.judul && detailData.judul !== article.title) {
             // Update document title for SEO
             document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
+          }
+
+          // 4. Sync live gallery images array
+          const rawGal = detailData.datagallery || detailData.datagambar || detailData.galeri || detailData.images || [];
+          if (Array.isArray(rawGal) && rawGal.length > 0) {
+            const parsedGal = rawGal.map((g: any) => {
+              if (typeof g === 'string') return getStorageUrl(g);
+              const photoPath = g.nama_photo || g.foto || g.gambar || g.photo || g.url || g.image || '';
+              return getStorageUrl(photoPath);
+            }).filter(Boolean);
+            if (parsedGal.length > 0) {
+              setLiveGalleryImages(parsedGal);
+            }
           }
         }
       } catch (err: any) {
@@ -506,20 +542,77 @@ export default function ArticleDetailView({
           </span>
         </div>
 
-        {/* Article Image */}
-        <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-          <img
-            src={article.imageUrl}
-            alt={article.title}
-            referrerPolicy="no-referrer"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
-            }}
-            className="w-full h-full object-cover rounded-[5px]"
-          />
-        </div>
+        {/* Article Image / Multi-Image Slider for GALERI category */}
+        {allGalleryImages.length > 1 ? (
+          <div className="flex flex-col gap-2.5">
+            {/* Main Interactive Slide Container */}
+            <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-900 border border-slate-200 dark:border-slate-800 group select-none">
+              <img
+                src={allGalleryImages[activeImageIndex] || article.imageUrl}
+                alt={`${article.title} - Foto ${activeImageIndex + 1}`}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
+                }}
+                className="w-full h-full object-cover transition-all duration-300"
+              />
+
+              {/* Prev Button */}
+              <button
+                onClick={() => setActiveImageIndex((prev) => (prev > 0 ? prev - 1 : allGalleryImages.length - 1))}
+                className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-90 sm:opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-lg active:scale-95"
+                title="Foto Sebelumnya"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+
+              {/* Next Button */}
+              <button
+                onClick={() => setActiveImageIndex((prev) => (prev < allGalleryImages.length - 1 ? prev + 1 : 0))}
+                className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-90 sm:opacity-0 group-hover:opacity-100 transition-all cursor-pointer shadow-lg active:scale-95"
+                title="Foto Selanjutnya"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Thumbnail Navigation Strip */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 no-scrollbar select-none">
+              {allGalleryImages.map((imgUrl, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveImageIndex(idx)}
+                  className={`relative shrink-0 w-20 h-14 rounded overflow-hidden border-2 transition-all cursor-pointer ${
+                    activeImageIndex === idx
+                      ? 'border-brand-red-600 ring-2 ring-brand-red-600/30 scale-105 opacity-100'
+                      : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <img
+                    src={imgUrl}
+                    alt={`Thumbnail ${idx + 1}`}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <img
+              src={article.imageUrl}
+              alt={article.title}
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
+              }}
+              className="w-full h-full object-cover rounded-[5px]"
+            />
+          </div>
+        )}
+
         <div className="-mt-3.5 text-xs text-slate-400 dark:text-slate-500 italic font-sans px-1">
-          <span>{article.caption ? `Foto: ${article.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
+          <span>{article.caption ? `Foto ${allGalleryImages.length > 1 ? `${activeImageIndex + 1}/${allGalleryImages.length}` : ''}: ${article.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
         </div>
 
         {/* Dynamic Toolbars (TTS, Bookmark, Share, Font Size) & Progress Player Block - Placed after Image */}

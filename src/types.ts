@@ -27,6 +27,7 @@ export interface Article {
   views?: number;
   dilihat?: number;
   caption?: string;
+  galleryImages?: string[];
 }
 
 export interface TimelineEvent {
