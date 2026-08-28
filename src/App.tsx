@@ -20,7 +20,7 @@ import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './li
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
 import StaticPageView from './components/StaticPageView';
-import { getArticleUrl, getNumericId, getArticleSlug } from './lib/urlHelpers';
+import { getArticleUrl, getNumericId, getArticleSlug, getStaticPageUrl, getCategoryUrl } from './lib/urlHelpers';
 
 // Resolve the correct channel ID from the channels list for API queries (matching sinpo 2 reference)
 function resolveChannelId(categoryName: string, channels: any[]): number | null {
@@ -584,7 +584,7 @@ export default function App() {
     setNavNonce((prev) => prev + 1);
 
     if (!skipPushState && typeof window !== 'undefined') {
-      const url = cat === 'SEMUA' ? '/' : `?category=${encodeURIComponent(cat)}`;
+      const url = cat === 'SEMUA' ? '/' : getCategoryUrl(cat);
       window.history.pushState({ type: 'category', category: cat }, '', url);
     }
   };
@@ -631,7 +631,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     if (!skipPushState && typeof window !== 'undefined') {
-      const url = `?page=${encodeURIComponent(slug)}`;
+      const url = getStaticPageUrl(slug);
       window.history.pushState({ type: 'static_page', slug }, '', url);
     }
     finishLoading(500);
@@ -655,6 +655,42 @@ export default function App() {
     return null;
   }, []);
 
+  const parseStaticPageTargetFromUrl = useCallback((): string | null => {
+    if (typeof window === 'undefined') return null;
+
+    const pathname = window.location.pathname;
+    const halamanMatch = pathname.match(/^\/halaman\/(?:[0-9]+\/)?([^\/]+)/);
+    if (halamanMatch && halamanMatch[1]) {
+      return halamanMatch[1];
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const pageParam = params.get('page') || params.get('modal');
+    if (pageParam) {
+      return pageParam;
+    }
+
+    return null;
+  }, []);
+
+  const parseCategoryTargetFromUrl = useCallback((): string | null => {
+    if (typeof window === 'undefined') return null;
+
+    const pathname = window.location.pathname;
+    const kanalMatch = pathname.match(/^\/(?:kanal|kategori)\/([^\/]+)/);
+    if (kanalMatch && kanalMatch[1]) {
+      return kanalMatch[1].replace(/-/g, ' ').toUpperCase();
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const categoryParam = params.get('category');
+    if (categoryParam) {
+      return categoryParam.toUpperCase();
+    }
+
+    return null;
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -662,11 +698,11 @@ export default function App() {
       triggerLoading(500);
 
       const targetArticleIdOrSlug = parseArticleTargetFromUrl();
+      const targetStaticPageSlug = parseStaticPageTargetFromUrl();
+      const targetCategory = parseCategoryTargetFromUrl();
       const params = new URLSearchParams(window.location.search);
-      const categoryParam = params.get('category');
       const searchParam = params.get('q');
       const tagParam = params.get('tag');
-      const pageParam = params.get('page');
 
       if (targetArticleIdOrSlug) {
         setStaticModalSlug(null);
@@ -707,11 +743,25 @@ export default function App() {
               finishLoading(500);
             });
         }
-      } else if (pageParam && pageParam.trim()) {
+      } else if (targetStaticPageSlug) {
         setSelectedArticle(null);
-        setStaticModalSlug(pageParam.trim());
+        setStaticModalSlug(targetStaticPageSlug);
         setSelectedTag(null);
         setSubmittedSearchQuery(null);
+        if (window.location.search.includes('page=') || window.location.search.includes('modal=')) {
+          window.history.replaceState({ type: 'static_page', slug: targetStaticPageSlug }, '', getStaticPageUrl(targetStaticPageSlug));
+        }
+        finishLoading(500);
+      } else if (targetCategory) {
+        setSelectedArticle(null);
+        setStaticModalSlug(null);
+        setSelectedCategory(targetCategory);
+        setSelectedTag(null);
+        setSubmittedSearchQuery(null);
+        if (window.location.search.includes('category=')) {
+          window.history.replaceState({ type: 'category', category: targetCategory }, '', getCategoryUrl(targetCategory));
+        }
+        setNavNonce((prev) => prev + 1);
         finishLoading(500);
       } else {
         setSelectedArticle(null);
@@ -723,10 +773,6 @@ export default function App() {
         } else if (tagParam && tagParam.trim()) {
           setSelectedTag(tagParam.trim());
           setSubmittedSearchQuery(null);
-        } else if (categoryParam && categoryParam.trim()) {
-          setSelectedCategory(categoryParam.trim().toUpperCase());
-          setSubmittedSearchQuery(null);
-          setSelectedTag(null);
         } else {
           setSelectedCategory('SEMUA');
           setSubmittedSearchQuery(null);
@@ -742,17 +788,17 @@ export default function App() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl]);
+  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const targetArticleIdOrSlug = parseArticleTargetFromUrl();
+    const targetStaticPageSlug = parseStaticPageTargetFromUrl();
+    const targetCategory = parseCategoryTargetFromUrl();
     const params = new URLSearchParams(window.location.search);
-    const categoryParam = params.get('category');
     const searchParam = params.get('q');
     const tagParam = params.get('tag');
-    const pageParam = params.get('page');
 
     if (targetArticleIdOrSlug) {
       triggerLoading(500);
@@ -775,17 +821,23 @@ export default function App() {
           setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           finishLoading(500);
         });
-    } else if (pageParam) {
-      setStaticModalSlug(pageParam.trim());
+    } else if (targetStaticPageSlug) {
+      setStaticModalSlug(targetStaticPageSlug);
+      if (window.location.search.includes('page=') || window.location.search.includes('modal=')) {
+        window.history.replaceState({ type: 'static_page', slug: targetStaticPageSlug }, '', getStaticPageUrl(targetStaticPageSlug));
+      }
       triggerLoading(500);
-    } else if (categoryParam) {
-      setSelectedCategory(categoryParam.trim().toUpperCase());
+    } else if (targetCategory) {
+      setSelectedCategory(targetCategory);
+      if (window.location.search.includes('category=')) {
+        window.history.replaceState({ type: 'category', category: targetCategory }, '', getCategoryUrl(targetCategory));
+      }
     } else if (searchParam) {
       setSubmittedSearchQuery(searchParam.trim());
     } else if (tagParam) {
       setSelectedTag(tagParam.trim());
     }
-  }, [triggerLoading, finishLoading, parseArticleTargetFromUrl]);
+  }, [triggerLoading, finishLoading, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl]);
 
   const [myCommentIds, setMyCommentIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -941,8 +993,13 @@ export default function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    let titleText = 'SinPo.id – Matahari Indonesia';
+    let metaDescriptionText = 'SinPo.id adalah portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari seluruh Indonesia secara tajam dan berimbang.';
+
     if (activeModalArticle) {
-      document.title = `${stripHtml(activeModalArticle.title)} – SinPo.id`;
+      const cleanTitle = stripHtml(activeModalArticle.title);
+      titleText = `${cleanTitle} – SinPo.id`;
+      metaDescriptionText = activeModalArticle.summary || cleanTitle;
     } else if (staticModalSlug) {
       const staticTitleMap: Record<string, string> = {
         'tentang-kami': 'Tentang Kami',
@@ -951,20 +1008,66 @@ export default function App() {
         'hubungi-kami': 'Hubungi Kami',
         'kebijakan-privasi': 'Kebijakan Privasi',
         'pedoman-siber': 'Pedoman Pemberitaan Media Siber',
+        'pedoman-pemberitaan-media-siber': 'Pedoman Pemberitaan Media Siber',
+      };
+      const staticDescMap: Record<string, string> = {
+        'tentang-kami': 'Tentang Kami SinPo.id - Portal berita politik nasional terpercaya yang menyajikan informasi terkini, independen, dan berintegritas tinggi.',
+        'redaksi': 'Susunan Redaksi & Manajemen Jurnalistik SinPo.id - Jajaran editor, jurnalis profesional, dan pengelola berita Matahari Indonesia.',
+        'pedoman-siber': 'Pedoman Pemberitaan Media Siber SinPo.id - Standar etika jurnalistik siber dan panduan penerbitan berita terpercaya sesuai ketentuan Dewan Pers.',
+        'pedoman-pemberitaan-media-siber': 'Pedoman Pemberitaan Media Siber SinPo.id - Standar etika jurnalistik siber dan panduan penerbitan berita terpercaya sesuai ketentuan Dewan Pers.',
       };
       const pageTitle = staticTitleMap[staticModalSlug] || 'Halaman';
-      document.title = `${pageTitle} – SinPo.id`;
+      titleText = `${pageTitle} – SinPo.id`;
+      metaDescriptionText = staticDescMap[staticModalSlug] || `Informasi resmi ${pageTitle} portal berita SinPo.id Matahari Indonesia.`;
     } else if (submittedSearchQuery && submittedSearchQuery.trim()) {
-      document.title = `Pencarian: "${submittedSearchQuery.trim()}" – SinPo.id`;
+      titleText = `Pencarian: "${submittedSearchQuery.trim()}" – SinPo.id`;
+      metaDescriptionText = `Hasil pencarian berita untuk kata kunci "${submittedSearchQuery.trim()}" di portal berita SinPo.id.`;
     } else if (selectedTag && selectedTag.trim()) {
-      document.title = `Tag: #${selectedTag.trim()} – SinPo.id`;
+      titleText = `Tag: #${selectedTag.trim()} – SinPo.id`;
+      metaDescriptionText = `Kumpulan berita dengan topik #${selectedTag.trim()} terbaru di SinPo.id.`;
     } else if (selectedCategory === 'INDEKS') {
-      document.title = `Indeks Berita – SinPo.id`;
+      titleText = `Indeks Berita – SinPo.id`;
+      metaDescriptionText = `Arsip dan indeks berita lengkap terkini SinPo.id Matahari Indonesia.`;
     } else if (selectedCategory && selectedCategory !== 'SEMUA') {
-      document.title = `${selectedCategory.toUpperCase()} – SinPo.id`;
-    } else {
-      document.title = `SinPo.id – Matahari Indonesia`;
+      const catUpper = selectedCategory.toUpperCase();
+      titleText = `${catUpper} – SinPo.id`;
+      const catDescMap: Record<string, string> = {
+        'POLITIK': 'Berita Politik Terkini & Parlemen - Kabar berita politik nasional, kebijakan pemerintah, isu DPR/MPR, dan dinamika politik Indonesia terbaru di SinPo.id.',
+        'HUKUM': 'Berita Hukum & Kriminalitas Terkini - Mengulas isu hukum, persidangan, kejaksaan, kepolisian, dan keadilan di Indonesia di SinPo.id.',
+        'EKBIS': 'Berita Ekonomi & Bisnis Terkini - Informasi seputar keuangan, pasar modal, industri, perbankan, dan perdagangan nasional di SinPo.id.',
+        'GALERI': 'Galeri Foto Berita & Peristiwa Terkini - Koleksi dokumentasi foto jurnalistik terbaik dan visualisasi peristiwa penting tanah air di SinPo.id.',
+        'GAYA HIDUP': 'Berita Gaya Hidup, Tren & Budaya - Seputar kesehatan, kuliner, travel, hiburan, dan gaya hidup terkini di SinPo.id.',
+        'PERISTIWA': 'Berita Peristiwa & Kejadian Terkini - Liputan berita hangat, bencana, dan peristiwa penting dari seluruh pelosok Indonesia di SinPo.id.',
+        'SIN PO DULU': 'Arsip & Sejarah Sin Po Dulu - Catatan sejarah, kilas balik jurnalisme klasik, dan rekaman peristiwa penting masa lalu di SinPo.id.',
+      };
+      metaDescriptionText = catDescMap[catUpper] || `Berita terkini kategori ${catUpper} dari portal berita SinPo.id Matahari Indonesia.`;
     }
+
+    document.title = titleText;
+
+    let metaDesc = document.querySelector('meta[name="description"]');
+    if (!metaDesc) {
+      metaDesc = document.createElement('meta');
+      metaDesc.setAttribute('name', 'description');
+      document.head.appendChild(metaDesc);
+    }
+    metaDesc.setAttribute('content', metaDescriptionText);
+
+    let ogDesc = document.querySelector('meta[property="og:description"]');
+    if (!ogDesc) {
+      ogDesc = document.createElement('meta');
+      ogDesc.setAttribute('property', 'og:description');
+      document.head.appendChild(ogDesc);
+    }
+    ogDesc.setAttribute('content', metaDescriptionText);
+
+    let ogTitle = document.querySelector('meta[property="og:title"]');
+    if (!ogTitle) {
+      ogTitle = document.createElement('meta');
+      ogTitle.setAttribute('property', 'og:title');
+      document.head.appendChild(ogTitle);
+    }
+    ogTitle.setAttribute('content', titleText);
   }, [activeModalArticle, staticModalSlug, submittedSearchQuery, selectedTag, selectedCategory]);
 
   // Cooperative Search & Category Filtering

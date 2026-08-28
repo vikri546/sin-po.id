@@ -47,3 +47,41 @@ export function getArticleUrl(article: Article): string {
   }
   return `/detail/${numericId}/${slug}`;
 }
+
+/**
+ * Static page ID mapping matching CMS API (channel tipe: 1)
+ */
+export const STATIC_PAGE_IDS: Record<string, { id: number; slug: string }> = {
+  'tentang-kami': { id: 10, slug: 'tentang-kami' },
+  'redaksi': { id: 11, slug: 'redaksi' },
+  'pedoman-pemberitaan-media-siber': { id: 13, slug: 'pedoman-pemberitaan-media-siber' },
+  'pedoman-siber': { id: 13, slug: 'pedoman-pemberitaan-media-siber' },
+  'syarat-dan-ketentuan': { id: 14, slug: 'syarat-dan-ketentuan' },
+  'kontak': { id: 9, slug: 'kontak' },
+  'hubungi-kami': { id: 9, slug: 'kontak' },
+};
+
+/**
+ * Returns clean static page URL: /halaman/[id]/[slug]
+ * Example: /halaman/10/tentang-kami
+ */
+export function getStaticPageUrl(slug: string): string {
+  if (!slug) return '/';
+  const cleanSlug = createSlug(slug);
+  const mapped = STATIC_PAGE_IDS[cleanSlug] || STATIC_PAGE_IDS[slug];
+  if (mapped) {
+    return `/halaman/${mapped.id}/${mapped.slug}`;
+  }
+  return `/halaman/10/${cleanSlug}`;
+}
+
+/**
+ * Returns clean category/channel URL: /kanal/[slug]
+ * Example: /kanal/politik
+ */
+export function getCategoryUrl(category: string): string {
+  if (!category || category.toUpperCase() === 'SEMUA') return '/';
+  const cleanSlug = createSlug(category);
+  return `/kanal/${cleanSlug}`;
+}
+

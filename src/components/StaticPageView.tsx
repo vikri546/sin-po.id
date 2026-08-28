@@ -12,17 +12,19 @@ interface StaticPageViewProps {
   onNavigateHome?: () => void;
 }
 
-// Numeric ID mapping matching sinpo 2 CMS backend API endpoints
+// Numeric ID mapping matching CMS backend channel API endpoints
 const STATIC_ID_MAP: Record<string, number> = {
   'tentang-kami': 10,
-  'redaksi': 7,
+  'redaksi': 11,
   'hak-jawab': 8,
   'hubungi-kami': 9,
   'kontak-kami': 9,
-  'kebijakan-privasi': 11,
-  'privacy-policy': 11,
-  'pedoman-siber': 12,
-  'pedoman-pemberitaan-media-siber': 12,
+  'kontak': 9,
+  'kebijakan-privasi': 14,
+  'privacy-policy': 14,
+  'syarat-dan-ketentuan': 14,
+  'pedoman-siber': 13,
+  'pedoman-pemberitaan-media-siber': 13,
 };
 
 const STATIC_TITLE_MAP: Record<string, { title: string; icon: any }> = {
