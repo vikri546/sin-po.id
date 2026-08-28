@@ -22,6 +22,8 @@ export interface Article {
   comments: Comment[];
   isInvestigative?: boolean;
   isHero?: boolean;
+  isHeadline?: boolean;
+  headline?: string;
   views?: number;
   dilihat?: number;
   caption?: string;

@@ -154,14 +154,18 @@ export default function App() {
   // Real-Time Live News Fetcher & Auto Polling
   const fetchLiveData = useCallback(async () => {
     try {
-      const response = await apiFetch('/berita?limit=100');
-      if (response.success && Array.isArray(response.data)) {
+      const [headlineRes, response] = await Promise.all([
+        apiFetch('/headline?limit=1').catch(() => null),
+        apiFetch('/berita?limit=100').catch(() => null),
+      ]);
+
+      if (response && response.success && Array.isArray(response.data)) {
         // Filter out takedown/scheduled articles from raw API data (matching sinpo 2 isTakedownArticle filter)
         const cleanRawData = response.data.filter((item: any) => item && !isTakedownArticle(item));
         const liveArticles = cleanRawData.map(transformLaravelPostToArticle);
         
         // Filter out valid articles
-        const validArticles = liveArticles.filter(a => a && a.id);
+        let validArticles = liveArticles.filter(a => a && a.id);
 
         if (validArticles.length > 0) {
           // Sort strictly newest first by date timestamp
@@ -171,8 +175,38 @@ export default function App() {
             return timeB - timeA;
           });
 
-          // Set first (newest) article as Hero
-          validArticles[0].isHero = true;
+          // Check if CMS has active headline articles from /headline endpoint or /berita items (matching sinpo 2 algorithm)
+          let headlineArt: Article | null = null;
+
+          if (headlineRes && headlineRes.success && Array.isArray(headlineRes.data) && headlineRes.data.length > 0) {
+            const cleanHeadlines = headlineRes.data.filter((item: any) => item && !isTakedownArticle(item));
+            if (cleanHeadlines.length > 0) {
+              // Sort headline articles strictly newest-first to get the latest CMS headline
+              const transformedHeadlines = cleanHeadlines.map(transformLaravelPostToArticle);
+              transformedHeadlines.sort((a, b) => {
+                const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+                const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+                return timeB - timeA;
+              });
+              headlineArt = transformedHeadlines[0];
+            }
+          }
+
+          // Fallback: check if any validArticle in pool has isHero/headline flag
+          if (!headlineArt) {
+            const cmsHeadlineInPool = validArticles.find(a => (a as any).isHeadline || (a as any).headline === '1' || (a as any).headline === 1);
+            if (cmsHeadlineInPool) {
+              headlineArt = cmsHeadlineInPool;
+            } else {
+              headlineArt = validArticles[0];
+            }
+          }
+
+          if (headlineArt) {
+            headlineArt.isHero = true;
+            const remaining = validArticles.filter(a => a.id !== headlineArt.id);
+            validArticles = [headlineArt, ...remaining];
+          }
 
           // Save to master live pool cache
           masterLiveArticlesRef.current = validArticles;
@@ -184,11 +218,11 @@ export default function App() {
           }
 
           // Update Breaking Ticker from top 5 newest items
-          const recentTicker = liveArticles.slice(0, 5).map(a => `${a.category}: ${a.title}`);
+          const recentTicker = validArticles.slice(0, 5).map(a => `${a.category}: ${a.title}`);
           setBreakingNewsList(recentTicker);
 
           // Derive Popular News from highest viewed recent articles
-          const sortedByPopularity = [...liveArticles].sort((a, b) => (b.views || 0) - (a.views || 0));
+          const sortedByPopularity = [...validArticles].sort((a, b) => (b.views || 0) - (a.views || 0));
           setPopularNewsList(sortedByPopularity.slice(0, 5));
         }
       }

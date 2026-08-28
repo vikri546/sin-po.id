@@ -331,6 +331,8 @@ export function transformLaravelPostToArticle(item: any): Article {
     tags: tagsList.length > 0 ? tagsList : [categoryName, 'SINPO MEDIA'],
     comments: [],
     isHero,
+    isHeadline: isHero,
+    headline: String(item.headline || ''),
     isInvestigative: categoryName === 'BONGKAR',
     views: viewsCount,
     dilihat: viewsCount,
