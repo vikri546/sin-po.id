@@ -85,3 +85,13 @@ export function getCategoryUrl(category: string): string {
   return `/kanal/${cleanSlug}`;
 }
 
+/**
+ * Returns clean tag URL: /tag/[slug]
+ * Example: /tag/buruh
+ */
+export function getTagUrl(tag: string): string {
+  if (!tag) return '/';
+  const cleanSlug = createSlug(tag);
+  return `/tag/${cleanSlug}`;
+}
+

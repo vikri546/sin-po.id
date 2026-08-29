@@ -16,16 +16,24 @@ interface StaticPageViewProps {
 const STATIC_ID_MAP: Record<string, { id_statis: number; id_channel: number }> = {
   'tentang-kami': { id_statis: 10, id_channel: 10 },
   'redaksi': { id_statis: 7, id_channel: 11 },
+  '7': { id_statis: 7, id_channel: 11 },
+  '11': { id_statis: 7, id_channel: 11 },
   'pedoman-siber': { id_statis: 12, id_channel: 13 },
   'pedoman-pemberitaan-media-siber': { id_statis: 12, id_channel: 13 },
+  '12': { id_statis: 12, id_channel: 13 },
+  '13': { id_statis: 12, id_channel: 13 },
   'syarat-dan-ketentuan': { id_statis: 11, id_channel: 14 },
   'kebijakan-privasi': { id_statis: 11, id_channel: 14 },
   'privacy-policy': { id_statis: 11, id_channel: 14 },
+  '14': { id_statis: 11, id_channel: 14 },
   'kontak': { id_statis: 9, id_channel: 9 },
   'kontak-kami': { id_statis: 9, id_channel: 9 },
   'hubungi-kami': { id_statis: 9, id_channel: 9 },
+  '9': { id_statis: 9, id_channel: 9 },
+  '10': { id_statis: 10, id_channel: 10 },
   'disclaimer': { id_statis: 8, id_channel: 12 },
   'hak-jawab': { id_statis: 8, id_channel: 12 },
+  '8': { id_statis: 8, id_channel: 12 },
 };
 
 const STATIC_TITLE_MAP: Record<string, { title: string; icon: any }> = {

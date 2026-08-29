@@ -10,10 +10,14 @@ interface IndeksPageViewProps {
   onSelectArticle: (article: Article) => void;
   isDarkMode: boolean;
   isLoading?: boolean;
+  selectedTag?: string | null;
+  onClearTag?: () => void;
+  onLoadMore?: () => Promise<void> | void;
 }
 
-export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, isLoading = false }: IndeksPageViewProps) {
-  if (isLoading) {
+export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, isLoading = false, selectedTag, onClearTag, onLoadMore }: IndeksPageViewProps) {
+  // Only show skeleton loader if articles array is completely empty to prevent UI blinking
+  if (isLoading && (!articles || articles.length === 0)) {
     return (
       <div className="w-full flex flex-col gap-6 text-left animate-fade-in">
         {/* Title & Stats */}
@@ -41,13 +45,10 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
               <div className="flex flex-col flex-1 justify-between py-1 min-w-0">
                 <div className="flex flex-col gap-1">
                   <Skeleton className="h-3 w-16 rounded-xs" />
-                  <Skeleton className="h-4 w-full rounded-sm" />
-                  <Skeleton className="h-4 w-4/5 rounded-sm" />
+                  <Skeleton className="h-4 w-full rounded-sm mt-1" />
+                  <Skeleton className="h-4 w-3/4 rounded-sm" />
                 </div>
-                <div className="flex items-center gap-x-1.5">
-                  <Skeleton className="h-3 w-20 rounded-xs" />
-                  <Skeleton className="h-3 w-24 rounded-xs" />
-                </div>
+                <Skeleton className="h-3 w-28 rounded-xs" />
               </div>
             </div>
           ))}
@@ -70,6 +71,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
     "EKBIS", 
     "BONGKAR", 
     "SIN PO DULU", 
+    "GAYA HIDUP",
     "OLAHRAGA", 
     "BUDAYA", 
     "GALERI", 
@@ -116,12 +118,20 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
 
   // Filter and sort articles (newest to oldest)
   const filteredAndSortedArticles = useMemo(() => {
+    if (!articles || articles.length === 0) return [];
     const q = searchQuery.toLowerCase().trim();
     
     const result = articles.filter((art) => {
-      // 1. Text Search Filter (title or subtitle)
-      if (q && !art.title.toLowerCase().includes(q) && !art.subtitle?.toLowerCase().includes(q)) {
-        return false;
+      // 1. Text Search Filter (title, subtitle, category, or tags)
+      if (q) {
+        const matchTitle = art.title.toLowerCase().includes(q);
+        const matchSubtitle = art.subtitle?.toLowerCase().includes(q);
+        const matchCategory = art.category.toLowerCase().includes(q);
+        const matchTags = art.tags && Array.isArray(art.tags) && art.tags.some(t => t.toLowerCase().includes(q));
+
+        if (!matchTitle && !matchSubtitle && !matchCategory && !matchTags) {
+          return false;
+        }
       }
 
       // 2. Date Filter
@@ -152,20 +162,38 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       return true;
     });
 
+    // Fallback: If local filter resulted in empty array, fallback to articles so page never goes blank
+    const finalItems = (result.length === 0 && !searchQuery && !searchDate && selectedCategories.length === 0)
+      ? articles
+      : result;
+
     // Sort newest first
-    return [...result].sort((a, b) => {
+    return [...finalItems].sort((a, b) => {
       const dateA = parseAnyDate(a.date);
       const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
   }, [articles, searchQuery, searchDate, selectedCategories]);
 
-  const handleLoadMore = () => {
+  const handleLoadMore = async () => {
+    if (isLoadingMore) return;
     setIsLoadingMore(true);
-    setTimeout(() => {
-      setVisibleCount((prev) => prev + 5);
+
+    try {
+      if (onLoadMore) {
+        await Promise.all([
+          onLoadMore(),
+          new Promise((resolve) => setTimeout(resolve, 500)),
+        ]);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } catch (err) {
+      console.log('Load more notice:', err);
+    } finally {
+      setVisibleCount((prev) => prev + 10);
       setIsLoadingMore(false);
-    }, 600);
+    }
   };
 
   // Format the Indonesian date representation for UI label
@@ -188,11 +216,25 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       {/* Title & Stats */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h2 className="font-sans text-xl md:text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
-            Indeks Berita
-          </h2>
+          <div className="flex items-center flex-wrap gap-2">
+            <h2 className="font-sans text-xl md:text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
+              {selectedTag ? `Arsip Tagar: #${selectedTag}` : "Indeks Berita"}
+            </h2>
+            {selectedTag && onClearTag && (
+              <button
+                onClick={onClearTag}
+                className="flex items-center gap-1 px-2.5 py-1 bg-brand-red-100 dark:bg-brand-red-950/40 text-brand-red-600 dark:text-brand-red-400 hover:bg-brand-red-200 dark:hover:bg-brand-red-900/50 rounded-full text-xs font-bold font-sans transition-colors cursor-pointer active:scale-95"
+                title="Hapus filter tagar"
+              >
+                <span>Hapus Tagar</span>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <p className="font-sans text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Cari semua arsip dan konten berita dari yang terbaru hingga terlama.
+            {selectedTag
+              ? `Menampilkan kumpulan artikel berita terkait topik tagar #${selectedTag}.`
+              : "Cari semua arsip dan konten berita dari yang terbaru hingga terlama."}
           </p>
         </div>
       </div>
@@ -219,51 +261,56 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
           )}
         </div>
 
-        {/* Category Selector Button */}
-        <button
-          onClick={openModal}
-          className="flex items-center justify-between gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 rounded-[5px] py-1.5 px-3 h-[38px] cursor-pointer text-left text-xs font-sans text-slate-700 dark:text-slate-300"
-        >
-          <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 shrink-0">
-            <Filter className="h-3.5 w-3.5 text-brand-red-600 dark:text-red-500" />
-            <span className="font-sans text-[10px] font-bold uppercase tracking-wider">
-              Kategori:
-            </span>
-            <span className="font-sans text-[11px] font-bold text-slate-900 dark:text-white">
-              {selectedCategories.length === 0 
-                ? "Semua" 
-                : `${selectedCategories.length} Terpilih`}
-            </span>
-          </div>
-          <span className="text-[9px] text-slate-400 shrink-0 ml-1">▼</span>
-        </button>
+        {/* Category & Date Sub-row for Mobile (side by side 2 cols), Flex for Desktop */}
+        <div className="grid grid-cols-2 gap-2.5 sm:flex sm:items-center sm:gap-3">
+          {/* Category Selector Button */}
+          <button
+            onClick={openModal}
+            className="flex items-center justify-between gap-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 rounded-[5px] py-1.5 px-2.5 sm:px-3 h-[38px] cursor-pointer text-left text-xs font-sans text-slate-700 dark:text-slate-300 w-full sm:w-auto min-w-0"
+          >
+            <div className="flex items-center gap-1 sm:gap-1.5 text-slate-600 dark:text-slate-400 min-w-0">
+              <Filter className="h-3.5 w-3.5 text-brand-red-600 dark:text-red-500 shrink-0" />
+              <span className="font-sans text-[10px] font-bold uppercase tracking-wider shrink-0">
+                Kategori:
+              </span>
+              <span className="font-sans text-[10.5px] sm:text-[11px] font-bold text-slate-900 dark:text-white truncate">
+                {selectedCategories.length === 0 
+                  ? "Semua" 
+                  : `${selectedCategories.length} Terpilih`}
+              </span>
+            </div>
+            <span className="text-[9px] text-slate-400 shrink-0 ml-0.5">▼</span>
+          </button>
 
-        {/* Date Selector Filter */}
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 rounded-[5px] py-1.5 px-3 h-[38px]">
-          <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 shrink-0">
-            <Calendar className="h-3.5 w-3.5 text-brand-red-600 dark:text-red-500" />
-            <span className="font-sans text-[10px] font-bold uppercase tracking-wider">
-              Tanggal:
-            </span>
+          {/* Date Selector Filter */}
+          <div className="flex items-center justify-between sm:justify-start gap-1 sm:gap-2 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800/80 rounded-[5px] py-1.5 px-2 sm:px-3 h-[38px] w-full sm:w-auto min-w-0">
+            <div className="flex items-center gap-1 sm:gap-1.5 text-slate-600 dark:text-slate-400 shrink-0">
+              <Calendar className="h-3.5 w-3.5 text-brand-red-600 dark:text-red-500 shrink-0" />
+              <span className="font-sans text-[10px] font-bold uppercase tracking-wider shrink-0">
+                Tanggal:
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-1 min-w-0 flex-1 justify-end sm:justify-start">
+              <input
+                type="date"
+                value={searchDate}
+                onChange={(e) => setSearchDate(e.target.value)}
+                className="w-full max-w-[105px] sm:max-w-none px-1 py-0.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[3px] text-[10px] sm:text-[11px] font-sans text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-red-500 focus:border-brand-red-500 dark:focus:ring-red-500 dark:focus:border-red-500 transition-all cursor-pointer truncate"
+                style={{ colorScheme: isDarkMode ? 'dark' : 'light' }}
+              />
+              {searchDate && (
+                <button
+                  onClick={() => setSearchDate("")}
+                  className="flex items-center gap-0.5 px-1 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-[3px] text-[9px] sm:text-[10px] font-sans font-medium transition-all cursor-pointer border border-slate-200/50 dark:border-slate-700 shrink-0"
+                  title="Hapus filter tanggal"
+                >
+                  <X className="h-2.5 w-2.5 text-slate-500 dark:text-slate-400" />
+                  <span className="hidden min-[380px]:inline">Hapus</span>
+                </button>
+              )}
+            </div>
           </div>
-          
-          <input
-            type="date"
-            value={searchDate}
-            onChange={(e) => setSearchDate(e.target.value)}
-            className="px-1.5 py-0.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[3px] text-[11px] font-sans text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-red-500 focus:border-brand-red-500 dark:focus:ring-red-500 dark:focus:border-red-500 transition-all cursor-pointer"
-            style={{ colorScheme: isDarkMode ? 'dark' : 'light' }}
-          />
-          {searchDate && (
-            <button
-              onClick={() => setSearchDate("")}
-              className="flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-[3px] text-[10px] font-sans font-medium transition-all cursor-pointer border border-slate-200/50 dark:border-slate-700"
-              title="Hapus filter tanggal"
-            >
-              <X className="h-2.5 w-2.5 text-slate-500 dark:text-slate-400" />
-              <span>Hapus</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -392,18 +439,18 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
               </div>
 
               {/* Content Frame */}
-              <div className="flex flex-col flex-1 justify-between py-1 min-w-0">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-sans font-black uppercase tracking-wider text-brand-red-600 leading-none">
-                    {art.category}
-                  </span>
-                  
-                  <h4 className="font-sans text-xs sm:text-sm md:text-base font-bold text-slate-900 dark:text-white leading-snug group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors my-1.5 line-clamp-3">
+              <div className="flex flex-col flex-1 justify-between py-0.5 min-w-0">
+                <span className="text-[9px] md:text-[10px] font-sans font-black uppercase tracking-wider text-brand-red-600 leading-none mb-1">
+                  {art.category}
+                </span>
+
+                <div className="my-auto py-1">
+                  <h4 className="font-sans text-xs sm:text-sm md:text-base font-bold text-slate-900 dark:text-white leading-snug group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors line-clamp-3">
                     {art.title}
                   </h4>
                 </div>
 
-                <div className="flex flex-nowrap items-center gap-x-1.5 text-[9px] md:text-xs text-slate-500 dark:text-slate-400 font-sans whitespace-nowrap overflow-hidden">
+                <div className="flex flex-nowrap items-center gap-x-1.5 text-[9px] md:text-xs text-slate-500 dark:text-slate-400 font-sans whitespace-nowrap overflow-hidden mt-1">
                   <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">
                     {art.author}
                   </span>

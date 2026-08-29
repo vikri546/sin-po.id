@@ -165,32 +165,26 @@ export default function CategoryPageView({
   }
 
   const handleLoadMore = async () => {
+    if (isLoadingMore) return;
     setIsLoadingMore(true);
 
-    // If local pool already has unshown articles, reveal them immediately!
-    if (visibleCount < beritaLainnyaPool.length) {
-      const newVisible = visibleCount + 10;
-      setVisibleCount(newVisible);
+    try {
+      if (visibleCount < beritaLainnyaPool.length) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      } else if (onLoadMoreRemote && hasMoreRemote !== false) {
+        await Promise.all([
+          onLoadMoreRemote(),
+          new Promise((resolve) => setTimeout(resolve, 500)),
+        ]);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    } catch (err) {
+      console.log('Remote category load notice:', err);
+    } finally {
+      setVisibleCount((prev) => prev + 10);
       setIsLoadingMore(false);
-
-      // If running low on local pool articles, prefetch remote items in background (fire & forget)
-      if (newVisible + 5 >= beritaLainnyaPool.length && onLoadMoreRemote && hasMoreRemote !== false) {
-        onLoadMoreRemote().catch(() => {});
-      }
-      return;
     }
-
-    // Otherwise, fetch remote page
-    if (onLoadMoreRemote && hasMoreRemote !== false) {
-      try {
-        await onLoadMoreRemote();
-      } catch (err) {
-        console.log('Remote category load notice:', err);
-      }
-    }
-
-    setVisibleCount(prev => prev + 10);
-    setIsLoadingMore(false);
   };
 
   return (

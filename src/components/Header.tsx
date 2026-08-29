@@ -7,6 +7,7 @@ import gsap from 'gsap';
 import { Article } from '../types';
 import Logo from './Logo';
 import { getArticleUrl } from '@/lib/urlHelpers';
+import { parseAnyDate } from '@/lib/dateFormatter';
 
 interface HeaderProps {
   bookmarkCount: number;
@@ -425,29 +426,40 @@ export default function Header({
                     Berita Terbaru
                   </h3>
                   <div className="flex flex-col gap-4">
-                    {articles && articles.slice(0, 5).map((art) => (
-                      <a
-                        key={art.id}
-                        href={getArticleUrl(art)}
-                        onClick={(e) => {
-                          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                          e.preventDefault();
-                          if (onSelectArticle) onSelectArticle(art);
-                          setIsDrawerOpen(false);
-                        }}
-                        className="group cursor-pointer space-y-1 block"
-                      >
-                        <span className="font-sans text-[9px] font-bold text-brand-red-600 uppercase tracking-wider">
-                          {art.category}
-                        </span>
-                        <h4 className="font-sans text-xs font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-brand-red-600 transition-colors line-clamp-2">
-                          {art.title}
-                        </h4>
-                        <span className="block font-sans text-[9px] text-slate-400 dark:text-slate-500 font-normal">
-                          {art.date}
-                        </span>
-                      </a>
-                    ))}
+                    {(() => {
+                      if (!articles || articles.length === 0) return null;
+                      
+                      // Sort articles strictly newest-first by published date timestamp so headline doesn't displace the newest articles
+                      const sortedLatest = [...articles].sort((a, b) => {
+                        const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+                        const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+                        return timeB - timeA;
+                      }).slice(0, 5);
+
+                      return sortedLatest.map((art) => (
+                        <a
+                          key={art.id}
+                          href={getArticleUrl(art)}
+                          onClick={(e) => {
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                            e.preventDefault();
+                            if (onSelectArticle) onSelectArticle(art);
+                            setIsDrawerOpen(false);
+                          }}
+                          className="group cursor-pointer space-y-1 block"
+                        >
+                          <span className="font-sans text-[9px] font-bold text-brand-red-600 uppercase tracking-wider">
+                            {art.category}
+                          </span>
+                          <h4 className="font-sans text-xs font-bold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-brand-red-600 transition-colors line-clamp-2">
+                            {art.title}
+                          </h4>
+                          <span className="block font-sans text-[9px] text-slate-400 dark:text-slate-500 font-normal">
+                            {art.date}
+                          </span>
+                        </a>
+                      ));
+                    })()}
                   </div>
                 </div>
 

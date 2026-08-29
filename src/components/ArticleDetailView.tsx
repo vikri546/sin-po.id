@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Twitter, Instagram, Linkedin, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
-import { getArticleUrl } from '@/lib/urlHelpers';
+import { getArticleUrl, getTagUrl } from '@/lib/urlHelpers';
 
 interface ArticleDetailViewProps {
   article: Article;
@@ -725,7 +725,7 @@ export default function ArticleDetailView({
             {article.tags.map((tag) => (
               <a
                 key={tag}
-                href={`?tag=${encodeURIComponent(tag)}`}
+                href={getTagUrl(tag)}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                   e.preventDefault();

@@ -20,11 +20,13 @@ import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './li
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
 import StaticPageView from './components/StaticPageView';
-import { getArticleUrl, getNumericId, getArticleSlug, getStaticPageUrl, getCategoryUrl } from './lib/urlHelpers';
+import { getArticleUrl, getNumericId, getArticleSlug, getStaticPageUrl, getCategoryUrl, getTagUrl, createSlug } from './lib/urlHelpers';
 
 // Resolve the correct channel ID from the channels list for API queries (matching sinpo 2 reference)
 function resolveChannelId(categoryName: string, channels: any[]): number | null {
   const cat = categoryName.toUpperCase().trim();
+  if (cat === 'GAYA HIDUP' || cat === 'GAYAHIDUP' || cat === 'GAYA-HIDUP') return 17;
+  if (cat === 'GALERI') return 15;
   if (cat === 'BONGKAR') return 21;
   if (cat === 'BUDAYA') return 22;
   if (cat === 'PENDIDIKAN') return 23;
@@ -288,22 +290,26 @@ export default function App() {
     setHasMoreCategoryNews(true);
     isFetchingCategoryRef.current = false;
 
-    // Trigger smooth loading skeleton for any page entrance/change
-    triggerLoading(500);
+    // Trigger loading ONLY if we don't have any articles loaded yet to prevent UI blinking
+    if (articlesState.length === 0 && masterLiveArticles.length === 0) {
+      triggerLoading(500);
+    }
 
     // Reset category pool and seen IDs when switching categories
     setCategoryArticlesPool([]);
     categorySeenIdsRef.current = new Set();
 
-    // A. HOMEPAGE ("SEMUA") without search or tag: Instant restore from masterLiveArticles
-    if ((!selectedCategory || selectedCategory === 'SEMUA') && !submittedSearchQuery && !selectedTag) {
-      const liveList = masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : masterLiveArticles;
+    // A. HOMEPAGE ("SEMUA") or INDEKS page without search or tag: Instant restore from masterLiveArticles
+    if ((!selectedCategory || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') && !submittedSearchQuery && !selectedTag) {
+      const liveList = masterLiveArticles.length > 0 
+        ? masterLiveArticles 
+        : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
       if (liveList.length > 0) {
         setArticlesState(liveList);
-        if (isMounted) finishLoading(500);
+        if (isMounted) finishLoading(0);
       } else {
         fetchLiveData().then(() => {
-          if (isMounted) finishLoading(500);
+          if (isMounted) finishLoading(0);
         });
       }
       return;
@@ -368,38 +374,38 @@ export default function App() {
           let endpoint = '/berita';
           const params = new URLSearchParams();
 
-          if (submittedSearchQuery && submittedSearchQuery.trim()) {
-            params.append('q', submittedSearchQuery.trim());
+          const queryTerm = submittedSearchQuery || selectedTag || '';
+          if (queryTerm && queryTerm.trim()) {
+            params.append('q', queryTerm.trim());
           }
 
-          if (selectedTag && selectedTag.trim()) {
-            params.append('tag', selectedTag.trim());
-          }
-
-          params.append('limit', '50');
+          params.append('limit', '100');
 
           const queryString = params.toString();
           if (queryString) {
             endpoint += `?${queryString}`;
           }
 
-          const res = await apiFetch(endpoint);
-          if (isMounted && res.success && Array.isArray(res.data)) {
-            const articles = res.data
-              .filter((item: any) => item && !isTakedownArticle(item))
-              .map(transformLaravelPostToArticle)
-              .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
-            
-            articles.sort((a, b) => {
-              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
-              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
-              return timeB - timeA;
-            });
-
-            if (articles.length > 0) {
-              articles[0].isHero = true;
+          try {
+            const res = await apiFetch(endpoint);
+            if (isMounted && res.success && Array.isArray(res.data) && res.data.length > 0) {
+              const fetched = res.data
+                .filter((item: any) => item && !isTakedownArticle(item))
+                .map(transformLaravelPostToArticle)
+                .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
+              
+              if (fetched.length > 0) {
+                setArticlesState(prev => {
+                  const existingIds = new Set(fetched.map(a => a.id));
+                  const oldNonDuplicates = prev.filter(a => !existingIds.has(a.id));
+                  const merged = [...fetched, ...oldNonDuplicates];
+                  merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+                  return merged;
+                });
+              }
             }
-            setArticlesState(articles);
+          } catch (err) {
+            console.log('Search/tag fetch notice:', err);
           }
         }
       } catch (err) {
@@ -499,6 +505,59 @@ export default function App() {
       isFetchingCategoryRef.current = false;
     }
   }, [selectedCategory, hasMoreCategoryNews, channelsList]);
+
+  const indexPageRef = useRef<number>(2);
+  const isFetchingIndexRef = useRef<boolean>(false);
+
+  const handleLoadMoreIndexArticles = useCallback(async () => {
+    if (isFetchingIndexRef.current) return;
+    isFetchingIndexRef.current = true;
+
+    try {
+      const pageToFetch = indexPageRef.current;
+      let endpoint = `/berita?limit=30&page=${pageToFetch}`;
+
+      if (submittedSearchQuery || selectedTag) {
+        const queryTerm = submittedSearchQuery || selectedTag || '';
+        endpoint = `/berita?q=${encodeURIComponent(queryTerm)}&limit=30&page=${pageToFetch}`;
+      }
+
+      const res = await apiFetch(endpoint);
+      indexPageRef.current = pageToFetch + 1;
+
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        const fetched = res.data
+          .filter((item: any) => item && !isTakedownArticle(item))
+          .map(transformLaravelPostToArticle)
+          .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
+
+        if (fetched.length > 0) {
+          setMasterLiveArticles(prev => {
+            const existingIds = new Set(prev.map(a => a.id));
+            const fresh = fetched.filter(a => !existingIds.has(a.id));
+            if (fresh.length === 0) return prev;
+            const merged = [...prev, ...fresh];
+            merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+            masterLiveArticlesRef.current = merged;
+            return merged;
+          });
+
+          setArticlesState(prev => {
+            const existingIds = new Set(prev.map(a => a.id));
+            const fresh = fetched.filter(a => !existingIds.has(a.id));
+            if (fresh.length === 0) return prev;
+            const merged = [...prev, ...fresh];
+            merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+            return merged;
+          });
+        }
+      }
+    } catch (err) {
+      console.log('Load more index error:', err);
+    } finally {
+      isFetchingIndexRef.current = false;
+    }
+  }, [submittedSearchQuery, selectedTag]);
 
   // Automatically fetch full detail content for the active hero article to populate its 2-line summary
   useEffect(() => {
@@ -613,7 +672,7 @@ export default function App() {
     setNavNonce((prev) => prev + 1);
 
     if (!skipPushState && typeof window !== 'undefined') {
-      const url = `?tag=${encodeURIComponent(tag)}`;
+      const url = getTagUrl(tag);
       window.history.pushState({ type: 'tag', tag }, '', url);
     }
   };
@@ -659,9 +718,14 @@ export default function App() {
     if (typeof window === 'undefined') return null;
 
     const pathname = window.location.pathname;
-    const halamanMatch = pathname.match(/^\/halaman\/(?:[0-9]+\/)?([^\/]+)/);
-    if (halamanMatch && halamanMatch[1]) {
-      return halamanMatch[1];
+    const statisMatch = pathname.match(/^\/(?:halaman|statis)\/(?:[0-9]+\/)?([^\/]+)/);
+    if (statisMatch && statisMatch[1]) {
+      return decodeURIComponent(statisMatch[1]);
+    }
+
+    const singleMatch = pathname.match(/^\/(?:halaman|statis)\/([0-9]+)/);
+    if (singleMatch && singleMatch[1]) {
+      return singleMatch[1];
     }
 
     const params = new URLSearchParams(window.location.search);
@@ -679,13 +743,32 @@ export default function App() {
     const pathname = window.location.pathname;
     const kanalMatch = pathname.match(/^\/(?:kanal|kategori)\/([^\/]+)/);
     if (kanalMatch && kanalMatch[1]) {
-      return kanalMatch[1].replace(/-/g, ' ').toUpperCase();
+      const decoded = decodeURIComponent(kanalMatch[1]).replace(/-/g, ' ').toUpperCase();
+      return decoded;
     }
 
     const params = new URLSearchParams(window.location.search);
     const categoryParam = params.get('category');
     if (categoryParam) {
-      return categoryParam.toUpperCase();
+      return decodeURIComponent(categoryParam).toUpperCase();
+    }
+
+    return null;
+  }, []);
+
+  const parseTagTargetFromUrl = useCallback((): string | null => {
+    if (typeof window === 'undefined') return null;
+
+    const pathname = window.location.pathname;
+    const tagMatch = pathname.match(/^\/(?:tag|tagar)\/([^\/]+)/);
+    if (tagMatch && tagMatch[1]) {
+      return decodeURIComponent(tagMatch[1]).replace(/-/g, ' ');
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const tagParam = params.get('tag');
+    if (tagParam) {
+      return decodeURIComponent(tagParam);
     }
 
     return null;
@@ -700,9 +783,9 @@ export default function App() {
       const targetArticleIdOrSlug = parseArticleTargetFromUrl();
       const targetStaticPageSlug = parseStaticPageTargetFromUrl();
       const targetCategory = parseCategoryTargetFromUrl();
+      const targetTag = parseTagTargetFromUrl();
       const params = new URLSearchParams(window.location.search);
       const searchParam = params.get('q');
-      const tagParam = params.get('tag');
 
       if (targetArticleIdOrSlug) {
         setStaticModalSlug(null);
@@ -763,6 +846,16 @@ export default function App() {
         }
         setNavNonce((prev) => prev + 1);
         finishLoading(500);
+      } else if (targetTag) {
+        setSelectedArticle(null);
+        setStaticModalSlug(null);
+        setSelectedTag(targetTag);
+        setSubmittedSearchQuery(null);
+        if (window.location.search.includes('tag=')) {
+          window.history.replaceState({ type: 'tag', tag: targetTag }, '', getTagUrl(targetTag));
+        }
+        setNavNonce((prev) => prev + 1);
+        finishLoading(500);
       } else {
         setSelectedArticle(null);
         setStaticModalSlug(null);
@@ -770,9 +863,6 @@ export default function App() {
         if (searchParam && searchParam.trim()) {
           setSubmittedSearchQuery(searchParam.trim());
           setSelectedTag(null);
-        } else if (tagParam && tagParam.trim()) {
-          setSelectedTag(tagParam.trim());
-          setSubmittedSearchQuery(null);
         } else {
           setSelectedCategory('SEMUA');
           setSubmittedSearchQuery(null);
@@ -788,7 +878,7 @@ export default function App() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl]);
+  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl, parseTagTargetFromUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -796,9 +886,9 @@ export default function App() {
     const targetArticleIdOrSlug = parseArticleTargetFromUrl();
     const targetStaticPageSlug = parseStaticPageTargetFromUrl();
     const targetCategory = parseCategoryTargetFromUrl();
+    const targetTag = parseTagTargetFromUrl();
     const params = new URLSearchParams(window.location.search);
     const searchParam = params.get('q');
-    const tagParam = params.get('tag');
 
     if (targetArticleIdOrSlug) {
       triggerLoading(500);
@@ -832,12 +922,15 @@ export default function App() {
       if (window.location.search.includes('category=')) {
         window.history.replaceState({ type: 'category', category: targetCategory }, '', getCategoryUrl(targetCategory));
       }
+    } else if (targetTag) {
+      setSelectedTag(targetTag);
+      if (window.location.search.includes('tag=')) {
+        window.history.replaceState({ type: 'tag', tag: targetTag }, '', getTagUrl(targetTag));
+      }
     } else if (searchParam) {
       setSubmittedSearchQuery(searchParam.trim());
-    } else if (tagParam) {
-      setSelectedTag(tagParam.trim());
     }
-  }, [triggerLoading, finishLoading, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl]);
+  }, [triggerLoading, finishLoading, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl, parseTagTargetFromUrl]);
 
   const [myCommentIds, setMyCommentIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -1118,14 +1211,31 @@ export default function App() {
     });
   }, [articlesState, submittedSearchQuery, searchDate]);
 
-  // Filter articles based on selected tag and sort by newest first
+  // Filter articles based on selected tag or title/category fallback, and sort by newest first
   const tagMatchedArticles = useMemo(() => {
     if (!selectedTag) return [];
-    const tagQuery = selectedTag.toLowerCase();
+    const tagQuery = selectedTag.toLowerCase().trim();
+    const tagSlug = createSlug(tagQuery);
 
-    const filtered = articlesState.filter(art => {
-      const matchTag = art.tags.some(t => t.toLowerCase() === tagQuery);
-      if (!matchTag) return false;
+    const pool = masterLiveArticles.length > 0 
+      ? masterLiveArticles 
+      : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
+
+    if (!pool || pool.length === 0) return [];
+
+    const filtered = pool.filter(art => {
+      // 1. Tag array match
+      const matchTag = art.tags && Array.isArray(art.tags) && art.tags.some(t => {
+        const cleanT = t.toLowerCase().trim();
+        const slugT = createSlug(cleanT);
+        return cleanT === tagQuery || slugT === tagSlug || cleanT.includes(tagQuery) || tagQuery.includes(cleanT);
+      });
+
+      // 2. Title or Category fallback match
+      const matchTitle = art.title && art.title.toLowerCase().includes(tagQuery);
+      const matchCategory = art.category && art.category.toLowerCase().includes(tagQuery);
+
+      if (!matchTag && !matchTitle && !matchCategory) return false;
       if (!searchDate) return true;
 
       try {
@@ -1139,17 +1249,29 @@ export default function App() {
       }
     });
 
+    const itemsToReturn = filtered.length > 0 ? filtered : pool;
+
     // Sort by date descending (newest first)
-    return [...filtered].sort((a, b) => {
+    return [...itemsToReturn].sort((a, b) => {
       const dateA = parseAnyDate(a.date);
       const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
-  }, [articlesState, selectedTag, searchDate]);
+  }, [articlesState, masterLiveArticles, selectedTag, searchDate]);
 
   const activeMatchedArticles = useMemo(() => {
-    return selectedTag ? tagMatchedArticles : searchMatchedArticles;
-  }, [selectedTag, tagMatchedArticles, searchMatchedArticles]);
+    const pool = masterLiveArticles.length > 0 
+      ? masterLiveArticles 
+      : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
+
+    if (selectedTag) {
+      return tagMatchedArticles.length > 0 ? tagMatchedArticles : pool;
+    }
+    if (submittedSearchQuery) {
+      return searchMatchedArticles.length > 0 ? searchMatchedArticles : pool;
+    }
+    return pool;
+  }, [selectedTag, tagMatchedArticles, submittedSearchQuery, searchMatchedArticles, masterLiveArticles, articlesState]);
 
   const formattedSearchDate = useMemo(() => {
     if (!searchDate) return "";
@@ -1278,6 +1400,15 @@ export default function App() {
                 onSelectArticle={handleSelectArticle}
                 isDarkMode={isDarkMode}
                 isLoading={isLoadingContent}
+                selectedTag={selectedTag}
+                onClearTag={() => {
+                  setSelectedTag(null);
+                  setNavNonce((prev) => prev + 1);
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState({ type: 'list' }, '', '/');
+                  }
+                }}
+                onLoadMore={handleLoadMoreIndexArticles}
               />
             </section>
 
@@ -1307,6 +1438,7 @@ export default function App() {
                 onSelectArticle={handleSelectArticle}
                 isDarkMode={isDarkMode}
                 isLoading={isLoadingContent}
+                onLoadMore={handleLoadMoreIndexArticles}
               />
             </section>
 
