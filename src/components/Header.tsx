@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import gsap from 'gsap';
 import { Article } from '../types';
 import Logo from './Logo';
-import { getArticleUrl } from '@/lib/urlHelpers';
+import { getArticleUrl, matchesWholeWord } from '@/lib/urlHelpers';
 import { parseAnyDate } from '@/lib/dateFormatter';
 
 interface HeaderProps {
@@ -50,14 +50,18 @@ export default function Header({
   const drawerDropdownRef = useRef<HTMLDivElement>(null);
   const toggleKnobRef = useRef<HTMLDivElement>(null);
 
-  const filteredLiveArticles = React.useMemo(() => {
-    if (!searchQuery.trim() || !articles) return [];
-    const q = searchQuery.toLowerCase();
-    return articles.filter(art => 
-      art.title.toLowerCase().includes(q) || 
-      art.category.toLowerCase().includes(q) || 
-      art.tags.some(t => t.toLowerCase().includes(q))
-    ).slice(0, 5);
+  const { top5Matches, totalMatchCount } = React.useMemo(() => {
+    if (!searchQuery.trim() || !articles) return { top5Matches: [], totalMatchCount: 0 };
+    const q = searchQuery.toLowerCase().trim();
+    const allMatches = articles.filter(art => 
+      matchesWholeWord(art.title, q) || 
+      matchesWholeWord(art.category, q) || 
+      (art.tags && Array.isArray(art.tags) && art.tags.some(t => matchesWholeWord(t, q)))
+    );
+    return {
+      top5Matches: allMatches.slice(0, 5),
+      totalMatchCount: allMatches.length
+    };
   }, [searchQuery, articles]);
 
   const isLainnyaActive = EXTRA_CATEGORIES.includes(selectedCategory.toUpperCase());
@@ -163,13 +167,13 @@ export default function Header({
               {/* Automatic Search Results */}
               {searchQuery.trim() !== "" ? (
                 <div className="w-full mt-4 flex flex-col gap-3">
-                  {filteredLiveArticles.length === 0 ? (
+                  {top5Matches.length === 0 ? (
                     <div className="py-6 text-center text-xs text-slate-400 dark:text-slate-500 font-sans">
                       Tidak ada berita yang cocok
                     </div>
                   ) : (
-                    <div className="w-full bg-white dark:bg-slate-900 rounded-[5px] border border-slate-100 dark:border-slate-800/80 p-1 divide-y divide-slate-100 dark:divide-slate-800/60 max-h-[45vh] overflow-y-auto custom-scrollbar shadow-none">
-                      {filteredLiveArticles.map((art) => (
+                    <div className="w-full bg-white dark:bg-slate-900 rounded-[5px] border border-slate-100 dark:border-slate-800/80 p-1 divide-y divide-slate-100 dark:divide-slate-800/60 max-h-[50vh] overflow-y-auto custom-scrollbar shadow-none">
+                      {top5Matches.map((art) => (
                         <a
                           key={art.id}
                           href={getArticleUrl(art)}
@@ -206,6 +210,21 @@ export default function Header({
                           </div>
                         </a>
                       ))}
+
+                      {totalMatchCount > 5 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onSearchSubmit && searchQuery.trim()) {
+                              onSearchSubmit(searchQuery);
+                              setShowMobileSearchInput(false);
+                            }
+                          }}
+                          className="w-full text-center py-2.5 px-3 font-sans text-xs font-bold text-brand-red-600 dark:text-brand-red-500 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer border-none shadow-none outline-none focus:outline-none"
+                        >
+                          Lihat Lainnya...
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>

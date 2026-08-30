@@ -3,7 +3,7 @@ import { Calendar, X, Loader2, Search, Filter } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { parseAnyDate } from '../lib/dateFormatter';
-import { getArticleUrl } from '@/lib/urlHelpers';
+import { getArticleUrl, matchesWholeWord } from '@/lib/urlHelpers';
 
 interface IndeksPageViewProps {
   articles: Article[];
@@ -16,8 +16,8 @@ interface IndeksPageViewProps {
 }
 
 export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, isLoading = false, selectedTag, onClearTag, onLoadMore }: IndeksPageViewProps) {
-  // Only show skeleton loader if articles array is completely empty to prevent UI blinking
-  if (isLoading && (!articles || articles.length === 0)) {
+  // Show skeleton loader while page is loading
+  if (isLoading) {
     return (
       <div className="w-full flex flex-col gap-6 text-left animate-fade-in">
         {/* Title & Stats */}
@@ -122,12 +122,12 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
     const q = searchQuery.toLowerCase().trim();
     
     const result = articles.filter((art) => {
-      // 1. Text Search Filter (title, subtitle, category, or tags)
+      // 1. Text Search Filter (title, subtitle, category, or tags) using matchesWholeWord to prevent subword false positives
       if (q) {
-        const matchTitle = art.title.toLowerCase().includes(q);
-        const matchSubtitle = art.subtitle?.toLowerCase().includes(q);
-        const matchCategory = art.category.toLowerCase().includes(q);
-        const matchTags = art.tags && Array.isArray(art.tags) && art.tags.some(t => t.toLowerCase().includes(q));
+        const matchTitle = matchesWholeWord(art.title, q);
+        const matchSubtitle = art.subtitle ? matchesWholeWord(art.subtitle, q) : false;
+        const matchCategory = matchesWholeWord(art.category, q);
+        const matchTags = art.tags && Array.isArray(art.tags) && art.tags.some(t => matchesWholeWord(t, q));
 
         if (!matchTitle && !matchSubtitle && !matchCategory && !matchTags) {
           return false;

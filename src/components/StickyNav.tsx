@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, X } from 'lucide-react';
 import gsap from 'gsap';
 import { Article } from '../types';
+import { matchesWholeWord } from '@/lib/urlHelpers';
 
 interface StickyNavProps {
   selectedCategory: string;
@@ -286,12 +287,17 @@ export default function StickyNav({
 
             {/* Auto Search suggestions dropdown */}
             {showSuggestions && searchQuery.trim().length > 0 && (() => {
-              const suggestions = articles
+              const q = searchQuery.toLowerCase().trim();
+              const allMatches = articles
                 ? articles.filter(art => 
-                    art.title.toLowerCase().includes(searchQuery.toLowerCase())
-                  ).slice(0, 5)
+                    matchesWholeWord(art.title, q) ||
+                    matchesWholeWord(art.category, q) ||
+                    (art.tags && Array.isArray(art.tags) && art.tags.some(t => matchesWholeWord(t, q)))
+                  )
                 : [];
-              if (suggestions.length === 0) {
+              const top5Matches = allMatches.slice(0, 5);
+
+              if (top5Matches.length === 0) {
                 return (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xl rounded-[5px] overflow-hidden z-50 p-4 text-center">
                     <p className="font-sans text-xs text-slate-500 dark:text-slate-400">
@@ -301,9 +307,9 @@ export default function StickyNav({
                 );
               }
               return (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xl rounded-[5px] overflow-hidden z-50 max-h-64 overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-xl rounded-[5px] overflow-hidden z-50 max-h-80 overflow-y-auto">
                   <div className="flex flex-col divide-y divide-slate-100 dark:divide-slate-900">
-                    {suggestions.map((art) => (
+                    {top5Matches.map((art) => (
                       <button
                         key={art.id}
                         type="button"
@@ -325,6 +331,21 @@ export default function StickyNav({
                         </span>
                       </button>
                     ))}
+
+                    {allMatches.length > 5 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onSearchSubmit && searchQuery.trim()) {
+                            onSearchSubmit(searchQuery);
+                            setShowSuggestions(false);
+                          }
+                        }}
+                        className="w-full text-center py-2.5 px-3 font-sans text-xs font-bold text-brand-red-600 dark:text-brand-red-500 bg-transparent hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer border-none shadow-none outline-none focus:outline-none"
+                      >
+                        Lihat Lainnya...
+                      </button>
+                    )}
                   </div>
                 </div>
               );

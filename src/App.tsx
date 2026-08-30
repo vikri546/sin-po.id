@@ -20,7 +20,7 @@ import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './li
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
 import StaticPageView from './components/StaticPageView';
-import { getArticleUrl, getNumericId, getArticleSlug, getStaticPageUrl, getCategoryUrl, getTagUrl, createSlug } from './lib/urlHelpers';
+import { getArticleUrl, getNumericId, getArticleSlug, getStaticPageUrl, getCategoryUrl, getTagUrl, createSlug, matchesWholeWord } from './lib/urlHelpers';
 
 // Resolve the correct channel ID from the channels list for API queries (matching sinpo 2 reference)
 function resolveChannelId(categoryName: string, channels: any[]): number | null {
@@ -93,6 +93,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [submittedSearchQuery, setSubmittedSearchQuery] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [tagOriginArticle, setTagOriginArticle] = useState<Article | null>(null);
   const [searchDate, setSearchDate] = useState<string>("");
 
   // Load More / Pagination States for Search and Tag pages
@@ -211,13 +212,33 @@ export default function App() {
             validArticles = [headlineArt, ...remaining];
           }
 
-          // Save to master live pool cache
-          masterLiveArticlesRef.current = validArticles;
-          setMasterLiveArticles(validArticles);
+          // Merge fresh live articles into existing master live pool so older paginated articles are NEVER wiped out
+          setMasterLiveArticles(prev => {
+            const existingIds = new Set(validArticles.map(a => a.id));
+            const oldHistorical = prev.filter(a => !existingIds.has(a.id));
+            const merged = [...validArticles, ...oldHistorical];
+            merged.sort((a, b) => {
+              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+              return timeB - timeA;
+            });
+            masterLiveArticlesRef.current = merged;
+            return merged;
+          });
 
-          // If currently on SEMUA homepage, update active articlesState directly
-          if (!selectedCategory || selectedCategory === 'SEMUA') {
-            setArticlesState(validArticles);
+          // Also merge into active articlesState without wiping out older paginated articles
+          if (!selectedCategory || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') {
+            setArticlesState(prev => {
+              const existingIds = new Set(validArticles.map(a => a.id));
+              const oldHistorical = prev.filter(a => !existingIds.has(a.id));
+              const merged = [...validArticles, ...oldHistorical];
+              merged.sort((a, b) => {
+                const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+                const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+                return timeB - timeA;
+              });
+              return merged;
+            });
           }
 
           // Update Breaking Ticker from top 5 newest items
@@ -290,26 +311,24 @@ export default function App() {
     setHasMoreCategoryNews(true);
     isFetchingCategoryRef.current = false;
 
-    // Trigger loading ONLY if we don't have any articles loaded yet to prevent UI blinking
-    if (articlesState.length === 0 && masterLiveArticles.length === 0) {
-      triggerLoading(500);
-    }
+    // Trigger smooth loading skeleton for any page entrance/change (400ms duration)
+    triggerLoading(400);
 
     // Reset category pool and seen IDs when switching categories
     setCategoryArticlesPool([]);
     categorySeenIdsRef.current = new Set();
 
-    // A. HOMEPAGE ("SEMUA") or INDEKS page without search or tag: Instant restore from masterLiveArticles
+    // A. HOMEPAGE ("SEMUA") or INDEKS page without search or tag: Smooth restore from masterLiveArticles
     if ((!selectedCategory || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') && !submittedSearchQuery && !selectedTag) {
       const liveList = masterLiveArticles.length > 0 
         ? masterLiveArticles 
         : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
       if (liveList.length > 0) {
         setArticlesState(liveList);
-        if (isMounted) finishLoading(0);
+        if (isMounted) finishLoading(400);
       } else {
         fetchLiveData().then(() => {
-          if (isMounted) finishLoading(0);
+          if (isMounted) finishLoading(400);
         });
       }
       return;
@@ -664,6 +683,10 @@ export default function App() {
   };
 
   const handleTagSelect = (tag: string, skipPushState: boolean = false) => {
+    // If user is currently viewing an article, save it as origin so clearing tag returns back to this article
+    if (selectedArticle) {
+      setTagOriginArticle(selectedArticle);
+    }
     setSelectedTag(tag);
     setSelectedArticle(null);
     setStaticModalSlug(null);
@@ -674,6 +697,31 @@ export default function App() {
     if (!skipPushState && typeof window !== 'undefined') {
       const url = getTagUrl(tag);
       window.history.pushState({ type: 'tag', tag }, '', url);
+    }
+  };
+
+  const handleClearTag = () => {
+    const originArt = tagOriginArticle;
+    setSelectedTag(null);
+    setTagOriginArticle(null);
+
+    if (originArt) {
+      // Return to the exact article detail page where tag was clicked
+      setSelectedArticle(originArt);
+      triggerLoading(300);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (typeof window !== 'undefined') {
+        const url = getArticleUrl(originArt);
+        window.history.pushState({ type: 'article', id: originArt.id }, '', url);
+      }
+    } else {
+      // Fallback: Return to homepage
+      setSelectedCategory("SEMUA");
+      setNavNonce((prev) => prev + 1);
+      triggerLoading(300);
+      if (typeof window !== 'undefined') {
+        window.history.pushState({ type: 'list' }, '', '/');
+      }
     }
   };
 
@@ -1217,23 +1265,29 @@ export default function App() {
     const tagQuery = selectedTag.toLowerCase().trim();
     const tagSlug = createSlug(tagQuery);
 
-    const pool = masterLiveArticles.length > 0 
-      ? masterLiveArticles 
-      : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
+    const poolMap = new Map<string, Article>();
+    masterLiveArticlesRef.current.forEach(a => poolMap.set(a.id, a));
+    masterLiveArticles.forEach(a => poolMap.set(a.id, a));
+    articlesState.forEach(a => poolMap.set(a.id, a));
+    const pool = Array.from(poolMap.values());
 
     if (!pool || pool.length === 0) return [];
 
     const filtered = pool.filter(art => {
-      // 1. Tag array match
+      // 1. Tag array match using exact token, slug, or whole-word match
       const matchTag = art.tags && Array.isArray(art.tags) && art.tags.some(t => {
+        if (!t) return false;
         const cleanT = t.toLowerCase().trim();
         const slugT = createSlug(cleanT);
-        return cleanT === tagQuery || slugT === tagSlug || cleanT.includes(tagQuery) || tagQuery.includes(cleanT);
+        if (cleanT === tagQuery || slugT === tagSlug) return true;
+        return matchesWholeWord(cleanT, tagQuery);
       });
 
-      // 2. Title or Category fallback match
-      const matchTitle = art.title && art.title.toLowerCase().includes(tagQuery);
-      const matchCategory = art.category && art.category.toLowerCase().includes(tagQuery);
+      // 2. Title match using whole-word boundary (prevents tag "AI" matching subword "mulai")
+      const matchTitle = art.title && matchesWholeWord(art.title, tagQuery);
+
+      // 3. Category match
+      const matchCategory = art.category && (art.category.toLowerCase().trim() === tagQuery || createSlug(art.category) === tagSlug);
 
       if (!matchTag && !matchTitle && !matchCategory) return false;
       if (!searchDate) return true;
@@ -1249,10 +1303,8 @@ export default function App() {
       }
     });
 
-    const itemsToReturn = filtered.length > 0 ? filtered : pool;
-
     // Sort by date descending (newest first)
-    return [...itemsToReturn].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const dateA = parseAnyDate(a.date);
       const dateB = parseAnyDate(b.date);
       return dateB.getTime() - dateA.getTime();
@@ -1260,12 +1312,14 @@ export default function App() {
   }, [articlesState, masterLiveArticles, selectedTag, searchDate]);
 
   const activeMatchedArticles = useMemo(() => {
-    const pool = masterLiveArticles.length > 0 
-      ? masterLiveArticles 
-      : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
+    const poolMap = new Map<string, Article>();
+    masterLiveArticlesRef.current.forEach(a => poolMap.set(a.id, a));
+    masterLiveArticles.forEach(a => poolMap.set(a.id, a));
+    articlesState.forEach(a => poolMap.set(a.id, a));
+    const pool = Array.from(poolMap.values());
 
     if (selectedTag) {
-      return tagMatchedArticles.length > 0 ? tagMatchedArticles : pool;
+      return tagMatchedArticles;
     }
     if (submittedSearchQuery) {
       return searchMatchedArticles.length > 0 ? searchMatchedArticles : pool;
@@ -1401,13 +1455,7 @@ export default function App() {
                 isDarkMode={isDarkMode}
                 isLoading={isLoadingContent}
                 selectedTag={selectedTag}
-                onClearTag={() => {
-                  setSelectedTag(null);
-                  setNavNonce((prev) => prev + 1);
-                  if (typeof window !== 'undefined') {
-                    window.history.pushState({ type: 'list' }, '', '/');
-                  }
-                }}
+                onClearTag={handleClearTag}
                 onLoadMore={handleLoadMoreIndexArticles}
               />
             </section>

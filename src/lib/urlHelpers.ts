@@ -95,3 +95,46 @@ export function getTagUrl(tag: string): string {
   return `/tag/${cleanSlug}`;
 }
 
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Checks if target term matches text as a whole word or exact token.
+ * Prevents subword false positives (e.g. tag "AI" will NOT match "mulai", "pantai", "sungai").
+ */
+export function matchesWholeWord(text: string, term: string): boolean {
+  if (!text || !term) return false;
+  const lowerText = text.toLowerCase();
+  const lowerTerm = term.toLowerCase().trim();
+
+  if (!lowerTerm) return false;
+
+  // 1. Direct equality
+  if (lowerText === lowerTerm) return true;
+
+  // 2. Slug equality
+  if (createSlug(lowerText) === createSlug(lowerTerm)) return true;
+
+  // 3. For short terms (<= 3 chars, e.g. "AI", "DPR", "MPR"), enforce strict word-boundary matching
+  if (lowerTerm.length <= 3) {
+    try {
+      const regex = new RegExp(`(?:^|[^a-zA-Z0-9_-])${escapeRegExp(lowerTerm)}(?:$|[^a-zA-Z0-9_-])`, 'i');
+      return regex.test(lowerText);
+    } catch (e) {
+      // fallback
+    }
+  }
+
+  // 4. For multi-character phrases/words, check word-boundary
+  try {
+    const regex = new RegExp(`(?:^|[^a-zA-Z0-9_-])${escapeRegExp(lowerTerm)}(?:$|[^a-zA-Z0-9_-])`, 'i');
+    if (regex.test(lowerText)) return true;
+  } catch (e) {
+    // fallback
+  }
+
+  // 5. General substring match for multi-word search queries (>= 4 chars)
+  return lowerTerm.length >= 4 && lowerText.includes(lowerTerm);
+}
+
