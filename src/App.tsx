@@ -29,6 +29,7 @@ function resolveChannelId(categoryName: string, channels: any[]): number | null 
   if (cat === 'GALERI') return 15;
   if (cat === 'BONGKAR') return 21;
   if (cat === 'BUDAYA') return 22;
+  if (cat === 'DUNIA') return 18;
   if (cat === 'PENDIDIKAN') return 23;
   if (cat === 'SIN PO DULU' || cat === 'SINPO DULU') return 24;
   if (cat === 'OLAHRAGA') return 25;
@@ -1691,6 +1692,7 @@ export default function App() {
                 <CategoryPageView
                   category={selectedCategory}
                   articles={remainingArticles}
+                  allArticlesPool={poolArticles}
                   allCategoryArticles={masterArticlesPool}
                   onSelectArticle={handleSelectArticle}
                   isLoading={isLoadingContent}

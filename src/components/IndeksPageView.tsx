@@ -4,6 +4,7 @@ import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { parseAnyDate } from '../lib/dateFormatter';
 import { getArticleUrl, matchesWholeWord } from '@/lib/urlHelpers';
+import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from '@/lib/apiClient';
 
 interface IndeksPageViewProps {
   articles: Article[];
@@ -15,47 +16,24 @@ interface IndeksPageViewProps {
   onLoadMore?: () => Promise<void> | void;
 }
 
+const CHANNEL_ID_MAP: Record<string, number> = {
+  'POLITIK': 2,
+  'PERISTIWA': 6,
+  'HUKUM': 3,
+  'EKBIS': 5,
+  'BONGKAR': 21,
+  'SIN PO DULU': 24,
+  'GAYA HIDUP': 17,
+  'OLAHRAGA': 25,
+  'BUDAYA': 22,
+  'DUNIA': 18,
+  'PENDIDIKAN': 23,
+  'GALERI': 15,
+  'OPINI': 4,
+};
+
 export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, isLoading = false, selectedTag, onClearTag, onLoadMore }: IndeksPageViewProps) {
-  // Show skeleton loader while page is loading
-  if (isLoading) {
-    return (
-      <div className="w-full flex flex-col gap-6 text-left animate-fade-in">
-        {/* Title & Stats */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-7 w-40 md:w-52 rounded-sm" />
-            <Skeleton className="h-3 w-64 md:w-80 rounded-xs" />
-          </div>
-        </div>
-
-        {/* Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-          <Skeleton className="h-[38px] flex-1 rounded-[5px]" />
-          <Skeleton className="h-[38px] w-36 rounded-[5px]" />
-          <Skeleton className="h-[38px] w-44 rounded-[5px]" />
-        </div>
-
-        {/* Articles Stream */}
-        <div className="flex flex-col">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex flex-row gap-4 py-5 border-b border-slate-200 dark:border-slate-800/60 last:border-b-0">
-              <div className="relative w-24 h-18 sm:w-44 sm:h-24 shrink-0 overflow-hidden rounded-[5px]">
-                <Skeleton className="w-full h-full rounded-[5px]" />
-              </div>
-              <div className="flex flex-col flex-1 justify-between py-1 min-w-0">
-                <div className="flex flex-col gap-1">
-                  <Skeleton className="h-3 w-16 rounded-xs" />
-                  <Skeleton className="h-4 w-full rounded-sm mt-1" />
-                  <Skeleton className="h-4 w-3/4 rounded-sm" />
-                </div>
-                <Skeleton className="h-3 w-28 rounded-xs" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const [isFilterLoading, setIsFilterLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [searchDate, setSearchDate] = useState<string>("");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -63,6 +41,9 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
   const [tempSelectedCategories, setTempSelectedCategories] = useState<string[]>([]);
   const [visibleCount, setVisibleCount] = useState<number>(10);
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
+  const [categoryFetchedArticles, setCategoryFetchedArticles] = useState<Article[]>([]);
+  const categoryPageMapRef = React.useRef<Record<string, number>>({});
 
   const AVAILABLE_CATEGORIES = [
     "POLITIK", 
@@ -74,9 +55,84 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
     "GAYA HIDUP",
     "OLAHRAGA", 
     "BUDAYA", 
+    "DUNIA",
+    "PENDIDIKAN",
     "GALERI", 
     "OPINI"
   ];
+
+  // Fetch full category articles directly from SinPo API when category filter is active
+  useEffect(() => {
+    if (selectedCategories.length === 0) {
+      setCategoryFetchedArticles([]);
+      return;
+    }
+
+    let isMounted = true;
+    setIsFilterLoading(true);
+
+    const initialPages: Record<string, number> = {};
+    selectedCategories.forEach(cat => { initialPages[cat] = 1; });
+    categoryPageMapRef.current = initialPages;
+
+    async function fetchCategoriesData() {
+      try {
+        const fetchPromises = selectedCategories.map(async (cat) => {
+          const chId = CHANNEL_ID_MAP[cat.toUpperCase()];
+          if (!chId) return [];
+          try {
+            const res = await apiFetch(`/berita?channel=${chId}&limit=50&sort=desc`);
+            if (res && res.success && Array.isArray(res.data)) {
+              return res.data
+                .filter((item: any) => item && !isTakedownArticle(item))
+                .map((item: any) => {
+                  const art = transformLaravelPostToArticle(item);
+                  art.category = cat.toUpperCase();
+                  return art;
+                });
+            }
+          } catch (e) {
+            console.log(`Error fetching channel ${chId} for ${cat}:`, e);
+          }
+          return [];
+        });
+
+        const results = await Promise.all(fetchPromises);
+        const combined = results.flat().filter((a: Article) => a && a.id);
+
+        if (isMounted) {
+          setCategoryFetchedArticles(combined);
+        }
+      } catch (err) {
+        console.log("Category fetch in IndeksPageView error:", err);
+      } finally {
+        if (isMounted) {
+          setIsFilterLoading(false);
+        }
+      }
+    }
+
+    fetchCategoriesData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCategories]);
+
+  // Merge categoryFetchedArticles with articles pool
+  const combinedArticles = useMemo(() => {
+    if (selectedCategories.length > 0) {
+      const existingMap = new Map<string, Article>();
+      categoryFetchedArticles.forEach(a => existingMap.set(a.id, a));
+      articles.forEach(a => {
+        if (selectedCategories.includes(a.category.toUpperCase()) && !existingMap.has(a.id)) {
+          existingMap.set(a.id, a);
+        }
+      });
+      return Array.from(existingMap.values());
+    }
+    return articles;
+  }, [articles, categoryFetchedArticles, selectedCategories]);
 
   // Open modal and clone existing selection
   const openModal = () => {
@@ -118,10 +174,10 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
 
   // Filter and sort articles (newest to oldest)
   const filteredAndSortedArticles = useMemo(() => {
-    if (!articles || articles.length === 0) return [];
+    if (!combinedArticles || combinedArticles.length === 0) return [];
     const q = searchQuery.toLowerCase().trim();
     
-    const result = articles.filter((art) => {
+    const result = combinedArticles.filter((art) => {
       // 1. Text Search Filter (title, subtitle, category, or tags) using matchesWholeWord to prevent subword false positives
       if (q) {
         const matchTitle = matchesWholeWord(art.title, q);
@@ -162,31 +218,71 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       return true;
     });
 
-    // Fallback: If local filter resulted in empty array, fallback to articles so page never goes blank
+    // Fallback: If local filter resulted in empty array, fallback to combinedArticles so page never goes blank
     const finalItems = (result.length === 0 && !searchQuery && !searchDate && selectedCategories.length === 0)
-      ? articles
+      ? combinedArticles
       : result;
 
-    // Sort newest first
+    // Sort newest first strictly by date timestamp
     return [...finalItems].sort((a, b) => {
-      const dateA = parseAnyDate(a.date);
-      const dateB = parseAnyDate(b.date);
-      return dateB.getTime() - dateA.getTime();
+      const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+      const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+      return timeB - timeA;
     });
-  }, [articles, searchQuery, searchDate, selectedCategories]);
+  }, [combinedArticles, searchQuery, searchDate, selectedCategories]);
 
   const handleLoadMore = async () => {
     if (isLoadingMore) return;
     setIsLoadingMore(true);
 
     try {
-      if (onLoadMore) {
-        await Promise.all([
-          onLoadMore(),
-          new Promise((resolve) => setTimeout(resolve, 500)),
-        ]);
+      if (selectedCategories.length > 0) {
+        // Fetch next page for each selected category directly from API
+        const fetchPromises = selectedCategories.map(async (cat) => {
+          const chId = CHANNEL_ID_MAP[cat.toUpperCase()];
+          if (!chId) return [];
+          const nextPage = (categoryPageMapRef.current[cat] || 1) + 1;
+          categoryPageMapRef.current[cat] = nextPage;
+          try {
+            const res = await apiFetch(`/berita?channel=${chId}&limit=50&page=${nextPage}&sort=desc`);
+            if (res && res.success && Array.isArray(res.data)) {
+              return res.data
+                .filter((item: any) => item && !isTakedownArticle(item))
+                .map((item: any) => {
+                  const art = transformLaravelPostToArticle(item);
+                  art.category = cat.toUpperCase();
+                  return art;
+                });
+            }
+          } catch (e) {
+            // ignore
+          }
+          return [];
+        });
+
+        const results = await Promise.all(fetchPromises);
+        const newCombined = results.flat().filter((a: Article) => a && a.id);
+
+        if (newCombined.length > 0) {
+          setCategoryFetchedArticles(prev => {
+            const existingIds = new Set(prev.map(a => a.id));
+            const fresh = newCombined.filter(a => !existingIds.has(a.id));
+            return [...prev, ...fresh];
+          });
+        }
+
+        if (onLoadMore) {
+          await onLoadMore();
+        }
       } else {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (onLoadMore) {
+          await Promise.all([
+            onLoadMore(),
+            new Promise((resolve) => setTimeout(resolve, 500)),
+          ]);
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
       }
     } catch (err) {
       console.log('Load more notice:', err);
@@ -210,6 +306,47 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
       return searchDate;
     }
   }, [searchDate]);
+
+  // Show skeleton loader while page or category filter is loading (evaluated AFTER all hooks are called)
+  if (isLoading || isFilterLoading) {
+    return (
+      <div className="w-full flex flex-col gap-6 text-left animate-fade-in">
+        {/* Title & Stats */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-7 w-40 md:w-52 rounded-sm" />
+            <Skeleton className="h-3 w-64 md:w-80 rounded-xs" />
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+          <Skeleton className="h-[38px] flex-1 rounded-[5px]" />
+          <Skeleton className="h-[38px] w-36 rounded-[5px]" />
+          <Skeleton className="h-[38px] w-44 rounded-[5px]" />
+        </div>
+
+        {/* Articles Stream */}
+        <div className="flex flex-col">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex flex-row gap-4 py-5 border-b border-slate-200 dark:border-slate-800/60 last:border-b-0">
+              <div className="relative w-24 h-18 sm:w-44 sm:h-24 shrink-0 overflow-hidden rounded-[5px]">
+                <Skeleton className="w-full h-full rounded-[5px]" />
+              </div>
+              <div className="flex flex-col flex-1 justify-between py-1 min-w-0">
+                <div className="flex flex-col gap-1">
+                  <Skeleton className="h-3 w-16 rounded-xs" />
+                  <Skeleton className="h-4 w-full rounded-sm mt-1" />
+                  <Skeleton className="h-4 w-3/4 rounded-sm" />
+                </div>
+                <Skeleton className="h-3 w-28 rounded-xs" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex flex-col gap-6 text-left animate-fade-in">
@@ -462,7 +599,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
           ))}
 
           {/* Load More Button matching search results styling */}
-          {filteredAndSortedArticles.length > visibleCount && (
+          {(filteredAndSortedArticles.length > visibleCount || Boolean(onLoadMore)) && (
             <div className="flex justify-center items-center py-6 mt-4">
               {isLoadingMore ? (
                 <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-sans text-xs font-bold uppercase tracking-wider">
