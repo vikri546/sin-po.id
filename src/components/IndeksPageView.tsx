@@ -599,7 +599,7 @@ export default function IndeksPageView({ articles, onSelectArticle, isDarkMode, 
           ))}
 
           {/* Load More Button matching search results styling */}
-          {(filteredAndSortedArticles.length > visibleCount || Boolean(onLoadMore)) && (
+          {filteredAndSortedArticles.length > 10 && visibleCount < filteredAndSortedArticles.length && (
             <div className="flex justify-center items-center py-6 mt-4">
               {isLoadingMore ? (
                 <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 font-sans text-xs font-bold uppercase tracking-wider">
