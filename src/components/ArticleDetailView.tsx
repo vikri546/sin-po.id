@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Twitter, Instagram, Linkedin, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl } from '@/lib/urlHelpers';
@@ -143,6 +143,61 @@ export default function ArticleDetailView({
     setFullContent(article.content || article.summary || article.subtitle || '');
   }, [article.id, article.content]);
 
+  // Dynamic NewsArticle JSON-LD Structured Data for Google Rich Results
+  useEffect(() => {
+    if (!article) return;
+
+    const cleanTitle = stripHtml(article.title);
+    const cleanSummary = stripHtml(article.summary || article.subtitle || article.content).slice(0, 200);
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
+    const imageUrl = article.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
+
+    const newsArticleSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'NewsArticle',
+      'mainEntityOfPage': {
+        '@type': 'WebPage',
+        '@id': currentUrl,
+      },
+      'headline': cleanTitle,
+      'description': cleanSummary,
+      'articleSection': (article.category || 'POLITIK').toUpperCase(),
+      'image': [imageUrl],
+      'datePublished': article.date || new Date().toISOString(),
+      'dateModified': article.date || new Date().toISOString(),
+      'author': [
+        {
+          '@type': 'Person',
+          'name': article.author || 'Redaksi SinPo',
+          'jobTitle': 'Jurnalis',
+          'url': 'https://sinpo.id',
+        },
+      ],
+      'publisher': {
+        '@type': 'Organization',
+        'name': 'SinPo.id',
+        'url': 'https://sinpo.id',
+        'logo': {
+          '@type': 'ImageObject',
+          'url': 'https://sinpo.id/sinpo-favicon.png',
+          'width': 512,
+          'height': 512,
+        },
+      },
+      'isAccessibleForFree': true,
+      'inLanguage': 'id-ID',
+    };
+
+    let scriptTag = document.getElementById('newsarticle-jsonld-client') as HTMLScriptElement;
+    if (!scriptTag) {
+      scriptTag = document.createElement('script');
+      scriptTag.id = 'newsarticle-jsonld-client';
+      scriptTag.type = 'application/ld+json';
+      document.head.appendChild(scriptTag);
+    }
+    scriptTag.textContent = JSON.stringify(newsArticleSchema);
+  }, [article]);
+
   // Article Not Found state (takedown / schedule / 404)
   const [isArticleNotFound, setIsArticleNotFound] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -169,6 +224,15 @@ export default function ArticleDetailView({
     });
     return list;
   }, [article.imageUrl, liveGalleryImages]);
+
+  const [copiedLink, setCopiedLink] = useState(false);
+  const handleCopyLink = () => {
+    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
+    navigator.clipboard.writeText(targetUrl).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2200);
+    }).catch(() => {});
+  };
 
   // Helper: extract view count from raw API data
   const extractViewCount = (data: any): number => {
@@ -466,7 +530,12 @@ export default function ArticleDetailView({
           {article.title}
         </h1>
 
-
+        {/* Subtitle / Ringkasan (jika ada) */}
+        {article.subtitle && (
+          <p className="font-sans text-sm md:text-base text-slate-600 dark:text-slate-300 leading-relaxed font-normal italic text-center md:text-left">
+            {stripHtml(article.subtitle)}
+          </p>
+        )}
 
         {/* Share Section (Bagikan: WA FB X IG IN) */}
         <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 -mt-2">
@@ -475,7 +544,7 @@ export default function ArticleDetailView({
           </span>
           <div className="flex items-center gap-2">
             <a
-              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(article.title + ' - ' + window.location.href)}`}
+              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(article.title + ' - ' + (typeof window !== 'undefined' ? window.location.href : ''))}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
@@ -484,7 +553,7 @@ export default function ArticleDetailView({
               <MessageCircle className="h-4 w-4" />
             </a>
             <a
-              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`}
+              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
@@ -493,13 +562,15 @@ export default function ArticleDetailView({
               <Facebook className="h-4 w-4" />
             </a>
             <a
-              href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(article.title)}&url=${encodeURIComponent(window.location.href)}`}
+              href={`https://x.com/intent/tweet?text=${encodeURIComponent(article.title)}&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
               title="Bagikan ke X"
             >
-              <Twitter className="h-4 w-4" />
+              <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
             </a>
             <a
               href="https://instagram.com"
@@ -511,7 +582,7 @@ export default function ArticleDetailView({
               <Instagram className="h-4 w-4" />
             </a>
             <a
-              href={`https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(window.location.href)}&title=${encodeURIComponent(article.title)}`}
+              href={`https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}&title=${encodeURIComponent(article.title)}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"

@@ -1187,29 +1187,39 @@ export default function App() {
 
     document.title = titleText;
 
-    let metaDesc = document.querySelector('meta[name="description"]');
-    if (!metaDesc) {
-      metaDesc = document.createElement('meta');
-      metaDesc.setAttribute('name', 'description');
-      document.head.appendChild(metaDesc);
-    }
-    metaDesc.setAttribute('content', metaDescriptionText);
+    const setMetaTag = (property: string, content: string, isName = false) => {
+      const attr = isName ? 'name' : 'property';
+      let tag = document.querySelector(`meta[${attr}="${property}"]`);
+      if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute(attr, property);
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute('content', content);
+    };
 
-    let ogDesc = document.querySelector('meta[property="og:description"]');
-    if (!ogDesc) {
-      ogDesc = document.createElement('meta');
-      ogDesc.setAttribute('property', 'og:description');
-      document.head.appendChild(ogDesc);
-    }
-    ogDesc.setAttribute('content', metaDescriptionText);
+    setMetaTag('description', metaDescriptionText, true);
+    setMetaTag('og:title', titleText);
+    setMetaTag('og:description', metaDescriptionText);
+    setMetaTag('og:site_name', 'SinPo.id');
+    setMetaTag('twitter:card', 'summary_large_image', true);
+    setMetaTag('twitter:site', '@sinpotv', true);
+    setMetaTag('twitter:title', titleText, true);
+    setMetaTag('twitter:description', metaDescriptionText, true);
 
-    let ogTitle = document.querySelector('meta[property="og:title"]');
-    if (!ogTitle) {
-      ogTitle = document.createElement('meta');
-      ogTitle.setAttribute('property', 'og:title');
-      document.head.appendChild(ogTitle);
+    if (activeModalArticle) {
+      setMetaTag('og:type', 'article');
+      setMetaTag('og:url', window.location.href);
+      if (activeModalArticle.imageUrl) {
+        setMetaTag('og:image', activeModalArticle.imageUrl);
+        setMetaTag('twitter:image', activeModalArticle.imageUrl, true);
+      }
+    } else {
+      setMetaTag('og:type', 'website');
+      setMetaTag('og:url', 'https://sinpo.id');
+      setMetaTag('og:image', 'https://sinpo.id/sinpo-favicon.png');
+      setMetaTag('twitter:image', 'https://sinpo.id/sinpo-favicon.png', true);
     }
-    ogTitle.setAttribute('content', titleText);
   }, [activeModalArticle, staticModalSlug, submittedSearchQuery, selectedTag, selectedCategory]);
 
   // Cooperative Search & Category Filtering
