@@ -57,7 +57,10 @@ export async function generateMetadata(props: {
   if (item && (item.judul || item.title)) {
     const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
     const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
-    const cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim().slice(0, 180);
+    let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+    if (cleanSummary.length > 140) {
+      cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
+    }
     const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
     const imageUrl = rawImage.startsWith('http')
       ? rawImage
@@ -120,7 +123,10 @@ export default async function DetailCatchAllPage(props: {
     if (item && (item.judul || item.title)) {
       const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
       const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
-      const cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+      if (cleanSummary.length > 180) {
+        cleanSummary = cleanSummary.slice(0, 177).trim() + '...';
+      }
       const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
       const imageUrl = rawImage.startsWith('http')
         ? rawImage
