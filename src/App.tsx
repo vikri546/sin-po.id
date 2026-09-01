@@ -941,7 +941,13 @@ export default function App() {
 
     if (targetArticleIdOrSlug) {
       triggerLoading(500);
+      setIsLoadingContent(true);
       const cleanId = getNumericId(targetArticleIdOrSlug);
+      
+      // Set temporary placeholder to avoid null reference crashes during initial render
+      const tempId = cleanId || targetArticleIdOrSlug;
+      setSelectedArticle((prev) => prev || transformLaravelPostToArticle({ id: tempId, judul: 'Memuat Berita...' }));
+
       apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
         .then((res) => {
           if (res.success && res.data && !isTakedownArticle(res.data)) {
@@ -954,10 +960,12 @@ export default function App() {
           } else {
             setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           }
+          setIsLoadingContent(false);
           finishLoading(500);
         })
         .catch(() => {
           setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
+          setIsLoadingContent(false);
           finishLoading(500);
         });
     } else if (targetStaticPageSlug) {

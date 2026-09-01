@@ -25,8 +25,11 @@ import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCo
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
-const calculateSpeechDuration = (title: string, author: string, content: string): number => {
-  const text = `${title}. Ditulis oleh ${author}. ${stripHtml(content)}`;
+const calculateSpeechDuration = (title?: string, author?: string, content?: string): number => {
+  const safeTitle = title || '';
+  const safeAuthor = author || '';
+  const safeContent = content || '';
+  const text = `${safeTitle}. Ditulis oleh ${safeAuthor}. ${stripHtml(safeContent)}`;
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.max(30, Math.round((words / 160) * 60));
 };
@@ -118,20 +121,22 @@ export default function ArticleDetailView({
       </article>
     );
   }
+
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechProgress, setSpeechProgress] = useState(0); // in seconds
   const [speechDuration, setSpeechDuration] = useState(() => 
-    calculateSpeechDuration(article.title, article.author, article.content)
+    calculateSpeechDuration(article?.title, article?.author, article?.content)
   );
   const [isDragging, setIsDragging] = useState(false);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
-  const [fullContent, setFullContent] = useState<string>(article.content || article.summary || article.subtitle || '');
+  const [fullContent, setFullContent] = useState<string>(article?.content || article?.summary || article?.subtitle || '');
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Initialize duration dynamically based on word count whenever article changes
   useEffect(() => {
+    if (!article) return;
     const contentToUse = fullContent || article.content || article.summary || '';
     const seconds = calculateSpeechDuration(article.title, article.author, contentToUse);
     setSpeechDuration(seconds);
@@ -140,15 +145,16 @@ export default function ArticleDetailView({
   }, [article, fullContent]);
 
   useEffect(() => {
+    if (!article) return;
     setFullContent(article.content || article.summary || article.subtitle || '');
-  }, [article.id, article.content]);
+  }, [article?.id, article?.content]);
 
   // Dynamic NewsArticle JSON-LD Structured Data for Google Rich Results
   useEffect(() => {
     if (!article) return;
 
-    const cleanTitle = stripHtml(article.title);
-    const cleanSummary = stripHtml(article.summary || article.subtitle || article.content).slice(0, 200);
+    const cleanTitle = stripHtml(article.title || '');
+    const cleanSummary = stripHtml(article.summary || article.subtitle || article.content || '').slice(0, 200);
     const currentUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
     const imageUrl = article.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
 
@@ -203,18 +209,18 @@ export default function ArticleDetailView({
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Multi-Image Gallery Slider states
-  const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => article.galleryImages || []);
+  const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => article?.galleryImages || []);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
   useEffect(() => {
-    if (article.galleryImages && article.galleryImages.length > 0) {
+    if (article?.galleryImages && article.galleryImages.length > 0) {
       setLiveGalleryImages(article.galleryImages);
     }
-  }, [article.id, article.galleryImages]);
+  }, [article?.id, article?.galleryImages]);
 
   const allGalleryImages = React.useMemo(() => {
     const list: string[] = [];
-    if (article.imageUrl && !article.imageUrl.includes('placehold.co')) {
+    if (article?.imageUrl && !article.imageUrl.includes('placehold.co')) {
       list.push(article.imageUrl);
     }
     (liveGalleryImages || []).forEach((imgUrl) => {
@@ -223,7 +229,7 @@ export default function ArticleDetailView({
       }
     });
     return list;
-  }, [article.imageUrl, liveGalleryImages]);
+  }, [article?.imageUrl, liveGalleryImages]);
 
   const [showCopyTooltip, setShowCopyTooltip] = useState(false);
   const handleCopyLink = () => {
