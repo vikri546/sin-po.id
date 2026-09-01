@@ -1225,6 +1225,8 @@ export default function App() {
       setMetaTag('og:image:secure_url', 'https://sinpo.id/sinpo-favicon.png');
       setMetaTag('og:image:width', '512');
       setMetaTag('og:image:height', '512');
+      setMetaTag('og:image:type', 'image/png');
+      setMetaTag('twitter:card', 'summary_large_image', true);
       setMetaTag('twitter:image', 'https://sinpo.id/sinpo-favicon.png', true);
     }
   }, [activeModalArticle, staticModalSlug, submittedSearchQuery, selectedTag, selectedCategory]);

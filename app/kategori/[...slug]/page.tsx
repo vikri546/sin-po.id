@@ -24,14 +24,25 @@ export async function generateMetadata(props: {
       description,
       url: canonicalUrl,
       siteName: 'SinPo.id',
+      images: [
+        {
+          url: 'https://sinpo.id/sinpo-favicon.png',
+          secureUrl: 'https://sinpo.id/sinpo-favicon.png',
+          width: 512,
+          height: 512,
+          type: 'image/png',
+          alt: 'SinPo.id Logo',
+        },
+      ],
       locale: 'id_ID',
       type: 'website',
     },
     twitter: {
-      card: 'summary',
+      card: 'summary_large_image',
       site: '@sinpotv',
       title,
       description,
+      images: ['https://sinpo.id/sinpo-favicon.png'],
     },
     icons: {
       icon: 'https://sinpo.id/sinpo-favicon.png',
