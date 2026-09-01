@@ -38,6 +38,53 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   return null;
 }
 
+function resolveStorageUrl(path?: string | null): string {
+  if (!path || typeof path !== 'string' || path.trim() === '') {
+    return 'https://sinpo.id/sinpo-favicon.png';
+  }
+
+  let cleanPath = path.trim();
+
+  if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {
+    try {
+      const urlObj = new URL(cleanPath);
+      cleanPath = urlObj.pathname;
+    } catch {
+      cleanPath = cleanPath.replace(/^https?:\/\/[^\/]+/, '');
+    }
+  }
+
+  if (cleanPath.startsWith('http://') || cleanPath.startsWith('https://')) {
+    return cleanPath;
+  }
+
+  if (cleanPath.startsWith('/')) {
+    cleanPath = cleanPath.substring(1);
+  }
+
+  if (
+    cleanPath.startsWith('storage/') ||
+    cleanPath.startsWith('uploads/') ||
+    cleanPath.startsWith('gambar/') ||
+    cleanPath.startsWith('foto/') ||
+    cleanPath.startsWith('asset/') ||
+    cleanPath.startsWith('assets/')
+  ) {
+    return `https://sinpo.id/${cleanPath}`;
+  }
+
+  if (!cleanPath.includes('/')) {
+    const dateMatch = cleanPath.match(/(\d{2})(\d{2})(\d{4})-\d+\.(?:jpg|png|jpeg|webp|gif)$/i);
+    if (dateMatch) {
+      const month = dateMatch[2];
+      const year = dateMatch[3];
+      cleanPath = `${year}/${month}/${cleanPath}`;
+    }
+  }
+
+  return `https://sinpo.id/storage/${cleanPath}`;
+}
+
 export async function generateMetadata(props: {
   params: Promise<{ slug?: string[] }>;
 }): Promise<Metadata> {
@@ -62,17 +109,24 @@ export async function generateMetadata(props: {
       cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
     }
     const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-    const imageUrl = rawImage.startsWith('http')
-      ? rawImage
-      : `https://sinpo.id/storage/${rawImage.replace(/^\/+/, '')}`;
+    const imageUrl = resolveStorageUrl(rawImage);
     const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
     const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
 
     return {
+      metadataBase: new URL('https://sinpo.id'),
       title: cleanTitle,
       description: cleanSummary,
       alternates: {
         canonical: canonicalUrl,
+      },
+      icons: {
+        icon: [
+          { url: 'https://sinpo.id/sinpo-favicon.png', type: 'image/png' },
+          { url: 'https://sinpo.id/favicon.ico', sizes: 'any' },
+        ],
+        shortcut: 'https://sinpo.id/sinpo-favicon.png',
+        apple: 'https://sinpo.id/sinpo-favicon.png',
       },
       openGraph: {
         title: cleanTitle,
@@ -82,8 +136,10 @@ export async function generateMetadata(props: {
         images: [
           {
             url: imageUrl,
+            secureUrl: imageUrl,
             width: 1200,
             height: 630,
+            type: 'image/jpeg',
             alt: cleanTitle,
           },
         ],
@@ -103,8 +159,13 @@ export async function generateMetadata(props: {
   }
 
   return {
+    metadataBase: new URL('https://sinpo.id'),
     title: 'SinPo.id - Matahari Indonesia',
     description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+    icons: {
+      icon: 'https://sinpo.id/sinpo-favicon.png',
+      shortcut: 'https://sinpo.id/sinpo-favicon.png',
+    },
   };
 }
 
@@ -128,9 +189,7 @@ export default async function DetailCatchAllPage(props: {
         cleanSummary = cleanSummary.slice(0, 177).trim() + '...';
       }
       const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-      const imageUrl = rawImage.startsWith('http')
-        ? rawImage
-        : `https://sinpo.id/storage/${rawImage.replace(/^\/+/, '')}`;
+      const imageUrl = resolveStorageUrl(rawImage);
       const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
       const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
       const channelName = item.datachannel?.nama || item.datakategori?.nama || item.kanal?.nama || item.kategori?.nama || item.category || 'POLITIK';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
+import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl } from '@/lib/urlHelpers';
@@ -225,12 +225,12 @@ export default function ArticleDetailView({
     return list;
   }, [article.imageUrl, liveGalleryImages]);
 
-  const [copiedLink, setCopiedLink] = useState(false);
+  const [showCopyTooltip, setShowCopyTooltip] = useState(false);
   const handleCopyLink = () => {
     const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
     navigator.clipboard.writeText(targetUrl).then(() => {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2200);
+      setShowCopyTooltip(true);
+      setTimeout(() => setShowCopyTooltip(false), 2000);
     }).catch(() => {});
   };
 
@@ -562,7 +562,7 @@ export default function ArticleDetailView({
               <Facebook className="h-4 w-4" />
             </a>
             <a
-              href={`https://x.com/intent/tweet?text=${encodeURIComponent(article.title)}&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
+              href={`https://x.com/intent/tweet?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
@@ -582,7 +582,7 @@ export default function ArticleDetailView({
               <Instagram className="h-4 w-4" />
             </a>
             <a
-              href={`https://www.linkedin.com/shareArticle?mini=true&url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}&title=${encodeURIComponent(article.title)}`}
+              href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
               target="_blank"
               rel="noopener noreferrer"
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
@@ -590,6 +590,25 @@ export default function ArticleDetailView({
             >
               <Linkedin className="h-4 w-4" />
             </a>
+
+            {/* Chain Icon for Copy Link with "link copied" Tooltip */}
+            <div className="relative inline-flex items-center">
+              <button
+                onClick={handleCopyLink}
+                className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
+                title="Salin Tautan"
+              >
+                <Link className="h-4 w-4" />
+              </button>
+
+              {/* Temporary Tooltip */}
+              {showCopyTooltip && (
+                <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-[11px] font-medium font-sans px-2.5 py-1 rounded shadow-md whitespace-nowrap animate-fade-in pointer-events-none z-30 flex items-center gap-1">
+                  <span>link copied</span>
+                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900 dark:border-t-slate-100" />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

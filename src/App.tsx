@@ -1212,12 +1212,19 @@ export default function App() {
       setMetaTag('og:url', window.location.href);
       if (activeModalArticle.imageUrl) {
         setMetaTag('og:image', activeModalArticle.imageUrl);
+        setMetaTag('og:image:secure_url', activeModalArticle.imageUrl);
+        setMetaTag('og:image:width', '1200');
+        setMetaTag('og:image:height', '630');
+        setMetaTag('og:image:type', 'image/jpeg');
         setMetaTag('twitter:image', activeModalArticle.imageUrl, true);
       }
     } else {
       setMetaTag('og:type', 'website');
       setMetaTag('og:url', 'https://sinpo.id');
       setMetaTag('og:image', 'https://sinpo.id/sinpo-favicon.png');
+      setMetaTag('og:image:secure_url', 'https://sinpo.id/sinpo-favicon.png');
+      setMetaTag('og:image:width', '512');
+      setMetaTag('og:image:height', '512');
       setMetaTag('twitter:image', 'https://sinpo.id/sinpo-favicon.png', true);
     }
   }, [activeModalArticle, staticModalSlug, submittedSearchQuery, selectedTag, selectedCategory]);
