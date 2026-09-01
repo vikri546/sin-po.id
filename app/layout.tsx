@@ -33,12 +33,12 @@ export const metadata: Metadata = {
     siteName: 'SinPo.id',
     images: [
       {
-        url: 'https://sinpo.id/sinpo-favicon.png',
-        secureUrl: 'https://sinpo.id/sinpo-favicon.png',
-        width: 512,
-        height: 512,
+        url: 'https://sinpo.id/sinpo-og-banner.png',
+        secureUrl: 'https://sinpo.id/sinpo-og-banner.png',
+        width: 1200,
+        height: 630,
         type: 'image/png',
-        alt: 'SinPo.id Logo',
+        alt: 'SinPo.id Matahari Indonesia',
       },
     ],
     locale: 'id_ID',
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
     site: '@sinpotv',
     title: 'SinPo.id - Matahari Indonesia',
     description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
-    images: ['https://sinpo.id/sinpo-favicon.png'],
+    images: ['https://sinpo.id/sinpo-og-banner.png'],
   },
   icons: {
     icon: [

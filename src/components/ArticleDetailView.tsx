@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link } from 'lucide-react';
+import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, MoreHorizontal } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl } from '@/lib/urlHelpers';
@@ -238,6 +238,28 @@ export default function ArticleDetailView({
       setShowCopyTooltip(true);
       setTimeout(() => setShowCopyTooltip(false), 2000);
     }).catch(() => {});
+  };
+
+  const handleNativeShare = async () => {
+    if (!article) return;
+    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
+    const shareData = {
+      title: stripHtml(article.title),
+      text: stripHtml(article.summary || article.subtitle || article.title),
+      url: targetUrl,
+    };
+
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          handleCopyLink();
+        }
+      }
+    } else {
+      handleCopyLink();
+    }
   };
 
   // Helper: extract view count from raw API data
@@ -560,59 +582,20 @@ export default function ArticleDetailView({
           </p>
         )}
 
-        {/* Share Section (Bagikan: WA FB X IG IN) */}
-        <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 -mt-2">
+        {/* Share Section (BAGIKAN : 3 Horizontal Dots Circle Button + Chain Copy Link Button) */}
+        <div className="flex items-center justify-center md:justify-start gap-2.5 -mt-2">
           <span className="font-sans text-[11px] font-bold tracking-wide text-slate-400 dark:text-slate-500 uppercase select-none">
-            Bagikan:
+            BAGIKAN :
           </span>
           <div className="flex items-center gap-2">
-            <a
-              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            {/* Native Web Share API Button (3 Horizontal Dots Icon) */}
+            <button
+              onClick={handleNativeShare}
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
-              title="Bagikan ke WhatsApp"
+              title="Bagikan Artikel"
             >
-              <MessageCircle className="h-4 w-4" />
-            </a>
-            <a
-              href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
-              title="Bagikan ke Facebook"
-            >
-              <Facebook className="h-4 w-4" />
-            </a>
-            <a
-              href={`https://x.com/intent/tweet?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
-              title="Bagikan ke X"
-            >
-              <svg className="h-3.5 w-3.5 fill-current" viewBox="0 0 24 24">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-              </svg>
-            </a>
-            <a
-              href="https://instagram.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
-              title="Bagikan ke Instagram"
-            >
-              <Instagram className="h-4 w-4" />
-            </a>
-            <a
-              href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(typeof window !== 'undefined' ? window.location.href : '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
-              title="Bagikan ke LinkedIn"
-            >
-              <Linkedin className="h-4 w-4" />
-            </a>
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
 
             {/* Chain Icon for Copy Link with "link copied" Tooltip */}
             <div className="relative inline-flex items-center">

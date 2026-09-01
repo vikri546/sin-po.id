@@ -40,7 +40,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
 
 function resolveStorageUrl(path?: string | null): string {
   if (!path || typeof path !== 'string' || path.trim() === '') {
-    return 'https://sinpo.id/sinpo-favicon.png';
+    return 'https://sinpo.id/sinpo-og-banner.png';
   }
 
   let cleanPath = path.trim();
@@ -113,6 +113,12 @@ export async function generateMetadata(props: {
     const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
     const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
 
+    let imageMimeType = 'image/jpeg';
+    const lowerImg = imageUrl.toLowerCase();
+    if (lowerImg.endsWith('.png')) imageMimeType = 'image/png';
+    else if (lowerImg.endsWith('.webp')) imageMimeType = 'image/webp';
+    else if (lowerImg.endsWith('.gif')) imageMimeType = 'image/gif';
+
     return {
       metadataBase: new URL('https://sinpo.id'),
       title: cleanTitle,
@@ -139,7 +145,7 @@ export async function generateMetadata(props: {
             secureUrl: imageUrl,
             width: 1200,
             height: 630,
-            type: 'image/jpeg',
+            type: imageMimeType,
             alt: cleanTitle,
           },
         ],
