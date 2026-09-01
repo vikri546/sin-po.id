@@ -385,74 +385,37 @@ export default function ArticleDetailView({
 
   // Handle Indonesian audio Text-to-Speech synthesis and seeking
   const toggleSpeech = () => {
-    if (isSpeaking) {
-      if (utteranceRef.current) {
-        utteranceRef.current.onend = null;
-        utteranceRef.current.onerror = null;
-        utteranceRef.current.onboundary = null;
-      }
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      setSpeechProgress(0);
-    } else {
-      window.speechSynthesis.cancel(); // Stop any other running synthesis
-      setSpeechProgress(0);
-
-      // Clean the text to avoid reading HTML codes
-      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${stripHtml(article.content)}`;
-      
-      const utterance = new SpeechSynthesisUtterance(contentToRead);
-      utterance.lang = 'id-ID';
-
-      // Attempt to bind an Indonesian voice specifically
-      const voices = window.speechSynthesis.getVoices();
-      const idVoice = voices.find(v => v.lang.includes('id') || v.lang.includes('ID'));
-      if (idVoice) {
-        utterance.voice = idVoice;
-      }
-
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        setSpeechProgress(0);
-      };
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        setSpeechProgress(0);
-      };
-
-      utteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-      setIsSpeaking(true);
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !window.speechSynthesis) {
+      onShare("Fitur audio tidak didukung di peramban ini.");
+      return;
     }
-  };
+    try {
+      if (isSpeaking) {
+        if (utteranceRef.current) {
+          utteranceRef.current.onend = null;
+          utteranceRef.current.onerror = null;
+          utteranceRef.current.onboundary = null;
+        }
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+        setSpeechProgress(0);
+      } else {
+        window.speechSynthesis.cancel(); // Stop any other running synthesis
+        setSpeechProgress(0);
 
-  const handleSeek = (newSeconds: number) => {
-    setSpeechProgress(newSeconds);
-    
-    // If speaking, restart from that percentage of the text content
-    if (isSpeaking) {
-      if (utteranceRef.current) {
-        utteranceRef.current.onend = null;
-        utteranceRef.current.onerror = null;
-        utteranceRef.current.onboundary = null;
-      }
-      window.speechSynthesis.cancel();
-      
-      const contentToRead = `${article.title}. Ditulis oleh ${article.author}. ${stripHtml(article.content)}`;
-      const percentage = newSeconds / speechDuration;
-      const startCharIndex = Math.floor(percentage * contentToRead.length);
-      const remainingText = contentToRead.substring(startCharIndex);
-      
-      if (remainingText.trim().length > 0) {
-        const utterance = new SpeechSynthesisUtterance(remainingText);
-        utterance.lang = 'id-ID';
+        // Clean the text to avoid reading HTML codes
+        const contentToRead = `${article?.title || ''}. Ditulis oleh ${article?.author || 'Redaksi SinPo'}. ${stripHtml(article?.content || '')}`;
         
-        const voices = window.speechSynthesis.getVoices();
-        const idVoice = voices.find(v => v.lang.includes('id') || v.lang.includes('ID'));
+        const utterance = new SpeechSynthesisUtterance(contentToRead);
+        utterance.lang = 'id-ID';
+
+        // Attempt to bind an Indonesian voice specifically
+        const voices = window.speechSynthesis.getVoices() || [];
+        const idVoice = voices.find(v => v.lang && (v.lang.includes('id') || v.lang.includes('ID')));
         if (idVoice) {
           utterance.voice = idVoice;
         }
-        
+
         utterance.onend = () => {
           setIsSpeaking(false);
           setSpeechProgress(0);
@@ -461,12 +424,61 @@ export default function ArticleDetailView({
           setIsSpeaking(false);
           setSpeechProgress(0);
         };
-        
+
         utteranceRef.current = utterance;
         window.speechSynthesis.speak(utterance);
-      } else {
+        setIsSpeaking(true);
+      }
+    } catch (e) {
+      setIsSpeaking(false);
+    }
+  };
+
+  const handleSeek = (newSeconds: number) => {
+    setSpeechProgress(newSeconds);
+    
+    // If speaking, restart from that percentage of the text content
+    if (isSpeaking && typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
+      try {
+        if (utteranceRef.current) {
+          utteranceRef.current.onend = null;
+          utteranceRef.current.onerror = null;
+          utteranceRef.current.onboundary = null;
+        }
+        window.speechSynthesis.cancel();
+        
+        const contentToRead = `${article?.title || ''}. Ditulis oleh ${article?.author || 'Redaksi SinPo'}. ${stripHtml(article?.content || '')}`;
+        const percentage = speechDuration > 0 ? newSeconds / speechDuration : 0;
+        const startCharIndex = Math.floor(percentage * contentToRead.length);
+        const remainingText = contentToRead.substring(startCharIndex);
+        
+        if (remainingText.trim().length > 0) {
+          const utterance = new SpeechSynthesisUtterance(remainingText);
+          utterance.lang = 'id-ID';
+          
+          const voices = window.speechSynthesis.getVoices() || [];
+          const idVoice = voices.find(v => v.lang && (v.lang.includes('id') || v.lang.includes('ID')));
+          if (idVoice) {
+            utterance.voice = idVoice;
+          }
+          
+          utterance.onend = () => {
+            setIsSpeaking(false);
+            setSpeechProgress(0);
+          };
+          utterance.onerror = () => {
+            setIsSpeaking(false);
+            setSpeechProgress(0);
+          };
+          
+          utteranceRef.current = utterance;
+          window.speechSynthesis.speak(utterance);
+        } else {
+          setIsSpeaking(false);
+          setSpeechProgress(0);
+        }
+      } catch (e) {
         setIsSpeaking(false);
-        setSpeechProgress(0);
       }
     }
   };
@@ -480,17 +492,22 @@ export default function ArticleDetailView({
   // Clean up speech synthesis when component unmounts
   useEffect(() => {
     return () => {
-      window.speechSynthesis.cancel();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (e) {}
+      }
     };
   }, []);
 
-  const isBookmarked = bookmarkedIds.includes(article.id);
-
-
+  const isBookmarked = (bookmarkedIds || []).includes(article?.id || '');
 
   const handleShareClick = () => {
-    const url = `${window.location.origin}/artikel/${article.id}`;
-    navigator.clipboard.writeText(url);
+    if (!article) return;
+    const url = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
     onShare("Tautan artikel berhasil disalin ke papan klip!");
   };
 
