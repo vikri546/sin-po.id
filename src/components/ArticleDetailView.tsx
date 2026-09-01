@@ -125,25 +125,29 @@ export default function ArticleDetailView({
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechProgress, setSpeechProgress] = useState(0); // in seconds
+  const [speechDuration, setSpeechDuration] = useState(() => 
+    calculateSpeechDuration(article?.title, article?.author, article?.content)
+  );
   const [isDragging, setIsDragging] = useState(false);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
-  const [liveContent, setLiveContent] = useState<string | null>(null);
+  const [fullContent, setFullContent] = useState<string>(article?.content || article?.summary || article?.subtitle || '');
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  const articleContent = liveContent || article?.content || article?.summary || article?.subtitle || '';
-  const [speechDuration, setSpeechDuration] = useState(() => 
-    calculateSpeechDuration(article?.title, article?.author, articleContent)
-  );
 
   // Initialize duration dynamically based on word count whenever article changes
   useEffect(() => {
     if (!article) return;
-    const seconds = calculateSpeechDuration(article.title, article.author, articleContent);
+    const contentToUse = fullContent || article.content || article.summary || '';
+    const seconds = calculateSpeechDuration(article.title, article.author, contentToUse);
     setSpeechDuration(seconds);
     setSpeechProgress(0);
     setLiveViews(null);
-  }, [article?.id, articleContent]);
+  }, [article, fullContent]);
+
+  useEffect(() => {
+    if (!article) return;
+    setFullContent(article.content || article.summary || article.subtitle || '');
+  }, [article?.id, article?.content]);
 
   // Dynamic NewsArticle JSON-LD Structured Data for Google Rich Results
   useEffect(() => {
@@ -300,7 +304,7 @@ export default function ArticleDetailView({
           // 2. Content / Isi — live edit sync
           const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
           if (fetchedContent) {
-            setLiveContent(fetchedContent);
+            setFullContent(fetchedContent);
           }
 
           // 3. Title — live edit sync (only on polling, not initial)
@@ -808,7 +812,7 @@ export default function ArticleDetailView({
                   ? "text-base"
                   : "text-lg md:text-xl"
             }`}
-            dangerouslySetInnerHTML={{ __html: formatArticleHtml(articleContent) }}
+            dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || article.content || article.summary || article.subtitle || '') }}
           />
 
           {/* Article Tags */}
