@@ -823,7 +823,7 @@ export default function ArticleDetailView({
                 key={tag}
                 href={getTagUrl(tag)}
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   if (onSelectTag) {
                     onSelectTag(tag);
@@ -925,7 +925,7 @@ export default function ArticleDetailView({
                       key={related.id}
                       href={getArticleUrl(related)}
                       onClick={(e) => {
-                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                         e.preventDefault();
                         onSelectArticle?.(related);
                       }}
@@ -990,7 +990,7 @@ export default function ArticleDetailView({
                     id={`article-detail-latest-card-${latest.id}`}
                     href={getArticleUrl(latest)}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       onSelectArticle?.(latest);
                     }}

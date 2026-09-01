@@ -97,7 +97,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
                   key={`hukum-${article.id}`}
                   href={getArticleUrl(article)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle(article);
                   }}
@@ -154,7 +154,7 @@ export default function HukumPolitikSection({ articles, onSelectArticle, isLoadi
                   key={`politik-${article.id}`}
                   href={getArticleUrl(article)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle(article);
                   }}

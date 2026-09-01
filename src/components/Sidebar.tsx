@@ -286,7 +286,7 @@ export default function Sidebar({
                 <a
                   href={getArticleUrl(bongkarArticle)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle?.(bongkarArticle);
                   }}
@@ -332,7 +332,7 @@ export default function Sidebar({
                 <a
                   href={getArticleUrl(sinpoDuluArticle)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle?.(sinpoDuluArticle);
                   }}
@@ -390,7 +390,7 @@ export default function Sidebar({
               const targetUrl = getArticleUrl(pop);
 
               const handleClick = (e: React.MouseEvent) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                 e.preventDefault();
                 if (onSelectArticle) {
                   onSelectArticle(pop);

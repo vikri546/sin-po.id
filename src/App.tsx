@@ -1896,7 +1896,7 @@ export default function App() {
               <a 
                 href="?page=tentang-kami"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("tentang-kami");
                 }}
@@ -1907,7 +1907,7 @@ export default function App() {
               <a 
                 href="?page=redaksi"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("redaksi");
                 }}
@@ -1918,7 +1918,7 @@ export default function App() {
               <a 
                 href="?page=hak-jawab"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("hak-jawab");
                 }}
@@ -1929,7 +1929,7 @@ export default function App() {
               <a 
                 href="?page=hubungi-kami"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("hubungi-kami");
                 }}
@@ -1940,7 +1940,7 @@ export default function App() {
               <a 
                 href="?page=kebijakan-privasi"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("kebijakan-privasi");
                 }}
@@ -1951,7 +1951,7 @@ export default function App() {
               <a 
                 href="?page=pedoman-siber"
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   handleStaticPageSelect("pedoman-siber");
                 }}

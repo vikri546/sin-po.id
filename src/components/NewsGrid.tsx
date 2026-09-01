@@ -192,7 +192,7 @@ export default function NewsGrid({
           href={getArticleUrl(heroArticle)}
           className="group relative block rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg cursor-pointer hover:shadow-xl transition-all duration-300"
           onClick={(e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
             e.preventDefault();
             onSelectArticle(heroArticle);
           }}
@@ -282,7 +282,7 @@ export default function NewsGrid({
                 key={pop.id}
                 href={getArticleUrl(pop)}
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   if (onSelectArticle) {
                     onSelectArticle(pop);
@@ -331,7 +331,7 @@ export default function NewsGrid({
                   id={`article-card-${article.id}`}
                   href={getArticleUrl(article)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle(article);
                   }}

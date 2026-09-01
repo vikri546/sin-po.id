@@ -160,7 +160,7 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
                     key={`t1-${idx}`}
                     href={url}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       handleItemClick(item);
                     }}
@@ -181,7 +181,7 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
                     key={`t2-${idx}`}
                     href={url}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       handleItemClick(item);
                     }}

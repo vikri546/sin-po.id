@@ -286,7 +286,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
               <a
                 href={getArticleUrl(bongkarItem)}
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   onSelectArticle(bongkarItem);
                 }}
@@ -336,7 +336,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
               <a
                 href={getArticleUrl(sinpoDuluItem)}
                 onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
                   onSelectArticle(sinpoDuluItem);
                 }}
@@ -376,7 +376,7 @@ export default function BongkarSection({ articles, onSelectArticle, isLoading = 
               key={`other-${article.id}`}
               href={getArticleUrl(article)}
               onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                 e.preventDefault();
                 onSelectArticle(article);
               }}

@@ -204,7 +204,7 @@ export default function CategoryPageView({
             <a 
               href={getArticleUrl(desktopCol1Article)}
               onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                 e.preventDefault();
                 onSelectArticle(desktopCol1Article);
               }}
@@ -239,7 +239,7 @@ export default function CategoryPageView({
             <a 
               href={getArticleUrl(mobileCol1Article)}
               onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                 e.preventDefault();
                 onSelectArticle(mobileCol1Article);
               }}
@@ -282,7 +282,7 @@ export default function CategoryPageView({
                   key={art.id} 
                   href={getArticleUrl(art)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle(art);
                   }}
@@ -326,7 +326,7 @@ export default function CategoryPageView({
                   key={art.id} 
                   href={getArticleUrl(art)}
                   onClick={(e) => {
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();
                     onSelectArticle(art);
                   }}
@@ -388,7 +388,7 @@ export default function CategoryPageView({
                     key={art.id}
                     href={getArticleUrl(art)}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       onSelectArticle(art);
                     }}
@@ -428,7 +428,7 @@ export default function CategoryPageView({
                     key={art.id}
                     href={getArticleUrl(art)}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       onSelectArticle(art);
                     }}
@@ -502,7 +502,7 @@ export default function CategoryPageView({
                     key={art.id}
                     href={getArticleUrl(art)}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                       e.preventDefault();
                       onSelectArticle(art);
                     }}

@@ -178,7 +178,7 @@ export default function Header({
                           key={art.id}
                           href={getArticleUrl(art)}
                           onClick={(e) => {
-                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                             e.preventDefault();
                             if (onSelectArticle) {
                               onSelectArticle(art);
@@ -460,7 +460,7 @@ export default function Header({
                           key={art.id}
                           href={getArticleUrl(art)}
                           onClick={(e) => {
-                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                             e.preventDefault();
                             if (onSelectArticle) onSelectArticle(art);
                             setIsDrawerOpen(false);
