@@ -943,10 +943,6 @@ export default function App() {
       triggerLoading(500);
       setIsLoadingContent(true);
       const cleanId = getNumericId(targetArticleIdOrSlug);
-      
-      // Set temporary placeholder to avoid null reference crashes during initial render
-      const tempId = cleanId || targetArticleIdOrSlug;
-      setSelectedArticle((prev) => prev || transformLaravelPostToArticle({ id: tempId, judul: 'Memuat Berita...' }));
 
       apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
         .then((res) => {
@@ -1425,14 +1421,14 @@ export default function App() {
         onSearchSubmit={(query) => handleSearchSubmit(query)}
       />
 
-      {activeModalArticle ? (
+      {(activeModalArticle || isLoadingContent) ? (
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 md:px-8 py-8">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
             
             {/* Column 1 & 2: Main News Detail (2/3 width) */}
             <section className="lg:col-span-2 flex flex-col gap-8">
               <ArticleDetailView
-                article={activeModalArticle}
+                article={activeModalArticle || transformLaravelPostToArticle({ id: 'loading', judul: '' })}
                 onBack={() => handleSelectArticle(null)}
                 bookmarkedIds={bookmarkedIds}
                 onToggleBookmark={handleToggleBookmark}
