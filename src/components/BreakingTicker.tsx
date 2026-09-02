@@ -127,11 +127,11 @@ export default function BreakingTicker({ items, articles, onSelectArticle }: Bre
       {/* Left Label & Running Marquee */}
       <div className="flex items-center gap-3 overflow-hidden flex-1 mr-1 md:mr-2">
         <a
-          href="https://youtube.com/@sinpotv?si=hiaKrjanN5Zh1GFe"
+          href="https://tv.sinpo.id"
           target="_blank"
           rel="noopener noreferrer"
           className="bg-brand-red-600 hover:bg-brand-red-700 transition-colors px-2.5 py-1 text-[10px] font-bold font-sans tracking-wider flex items-center gap-1.5 shrink-0 uppercase rounded-sm text-white cursor-pointer"
-          title="SIN PO TV (Buka di Tab Baru)"
+          title="SIN PO TV Website"
         >
           <span className="relative flex h-2 w-2 mr-1">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>

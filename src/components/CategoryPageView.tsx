@@ -215,6 +215,9 @@ export default function CategoryPageView({
                   src={desktopCol1Article.imageUrl} 
                   alt={desktopCol1Article.title} 
                   referrerPolicy="no-referrer"
+                  fetchPriority="high"
+                  loading="eager"
+                  decoding="async"
                   onError={(e) => { e.currentTarget.src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media'; }}
                   className="h-full w-full object-cover rounded-[5px]" 
                 />
@@ -250,6 +253,9 @@ export default function CategoryPageView({
                   src={mobileCol1Article.imageUrl} 
                   alt={mobileCol1Article.title} 
                   referrerPolicy="no-referrer"
+                  fetchPriority="high"
+                  loading="eager"
+                  decoding="async"
                   onError={(e) => { e.currentTarget.src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media'; }}
                   className="h-full w-full object-cover rounded-[5px]" 
                 />

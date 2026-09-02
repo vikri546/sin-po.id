@@ -55,6 +55,28 @@ function getCategoryEndpoint(categoryName: string, page: number, channelId: numb
   return `/berita?channel=${encodeURIComponent(catQuery)}&page=${page}&limit=20&sort=desc`;
 }
 
+// In-memory cache for category articles
+const categoryArticlesCache = new Map<string, Article[]>();
+
+function getInitialCategoryArticlesFromMaster(categoryName: string, masterList: Article[]): Article[] {
+  if (!categoryName || categoryName === 'SEMUA') return masterList;
+  const searchCat = categoryName.toUpperCase().trim();
+  const filtered = masterList.filter((a) => {
+    if (!a || !a.category) return false;
+    const aCat = a.category.toUpperCase().trim();
+    if (aCat === searchCat) return true;
+    if (searchCat === 'POLITIK' && (aCat.includes('POLITIK') || aCat.includes('PARLEMEN'))) return true;
+    if (searchCat === 'HUKUM' && (aCat.includes('HUKUM') || aCat.includes('KRIMINAL'))) return true;
+    if (searchCat === 'EKBIS' && (aCat.includes('EKBIS') || aCat.includes('EKONOMI') || aCat.includes('BISNIS'))) return true;
+    if (searchCat === 'GAYA HIDUP' && (aCat.includes('GAYA') || aCat.includes('LIFESTYLE'))) return true;
+    return aCat.includes(searchCat);
+  });
+  if (filtered.length > 0) {
+    filtered[0].isHero = true;
+  }
+  return filtered;
+}
+
 // Filter helper to exclude legacy 2022 fallback articles with broken dummy images (e.g. Pembalap MotoGP, Lahan Sawit)
 function isBrokenLegacyArticle(art: Article): boolean {
   if (!art || !art.title) return true;
@@ -81,21 +103,119 @@ const highlightText = (text: string, query: string) => {
   );
 };
 
-export default function App() {
-  // Theme State
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    const saved = localStorage.getItem('sinpo_theme');
-    return saved === 'dark';
-  });
+function parseArticleTargetFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname;
+  const detailMatch = pathname.match(/^\/detail\/([^\/]+)/);
+  if (detailMatch && detailMatch[1]) return detailMatch[1];
+  const params = new URLSearchParams(window.location.search);
+  return params.get('article');
+}
 
-  // Category and Search Filtering States
-  const [selectedCategory, setSelectedCategory] = useState<string>("SEMUA");
+function parseStaticPageTargetFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname;
+  const statisMatch = pathname.match(/^\/(?:halaman|statis)\/(?:[0-9]+\/)?([^\/]+)/);
+  if (statisMatch && statisMatch[1]) return decodeURIComponent(statisMatch[1]);
+  const singleMatch = pathname.match(/^\/(?:halaman|statis)\/([0-9]+)/);
+  if (singleMatch && singleMatch[1]) return singleMatch[1];
+  const params = new URLSearchParams(window.location.search);
+  return params.get('page') || params.get('modal');
+}
+
+function parseCategoryTargetFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname;
+  const kanalMatch = pathname.match(/^\/(?:kanal|kategori)\/([^\/]+)/);
+  if (kanalMatch && kanalMatch[1]) {
+    return decodeURIComponent(kanalMatch[1]).replace(/-/g, ' ').toUpperCase();
+  }
+  const params = new URLSearchParams(window.location.search);
+  const categoryParam = params.get('category');
+  if (categoryParam) return decodeURIComponent(categoryParam).toUpperCase();
+  return null;
+}
+
+function parseTagTargetFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+  const pathname = window.location.pathname;
+  const tagMatch = pathname.match(/^\/(?:tag|tagar)\/([^\/]+)/);
+  if (tagMatch && tagMatch[1]) {
+    return decodeURIComponent(tagMatch[1]).replace(/-/g, ' ');
+  }
+  const params = new URLSearchParams(window.location.search);
+  const tagParam = params.get('tag');
+  if (tagParam) return decodeURIComponent(tagParam);
+  return null;
+}
+
+export interface AppProps {
+  initialArticle?: Article | null;
+  initialCategory?: string;
+  initialStaticSlug?: string | null;
+}
+
+export default function App({ initialArticle = null, initialCategory = 'SEMUA', initialStaticSlug = null }: AppProps = {}) {
+  // Theme State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
+
+  // Category, Search, Tag, Static Page & Article Filtering States — Initialized directly from window URL / SSR props for 100% hydration match
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
+    if (initialCategory && initialCategory !== 'SEMUA') return initialCategory;
+    if (typeof window !== 'undefined') {
+      const parsedCat = parseCategoryTargetFromUrl();
+      if (parsedCat) return parsedCat;
+    }
+    return initialCategory || "SEMUA";
+  });
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [submittedSearchQuery, setSubmittedSearchQuery] = useState<string | null>(null);
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [submittedSearchQuery, setSubmittedSearchQuery] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q');
+      if (q && q.trim()) return q.trim();
+    }
+    return null;
+  });
+  const [selectedTag, setSelectedTag] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return parseTagTargetFromUrl();
+    }
+    return null;
+  });
   const [tagOriginArticle, setTagOriginArticle] = useState<Article | null>(null);
   const [searchDate, setSearchDate] = useState<string>("");
+  const [staticModalSlug, setStaticModalSlug] = useState<string | null>(() => {
+    if (initialStaticSlug) return initialStaticSlug;
+    if (typeof window !== 'undefined') {
+      return parseStaticPageTargetFromUrl();
+    }
+    return null;
+  });
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(() => {
+    if (initialArticle) return initialArticle;
+    if (typeof window !== 'undefined') {
+      const targetArticleIdOrSlug = parseArticleTargetFromUrl();
+      if (targetArticleIdOrSlug) {
+        const cleanId = getNumericId(targetArticleIdOrSlug);
+        try {
+          const savedMaster = localStorage.getItem('sinpo_cached_master_articles_v1');
+          if (savedMaster) {
+            const parsed = JSON.parse(savedMaster);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const matched = parsed.find((a: Article) => {
+                const aNumId = getNumericId(a.id);
+                return aNumId === cleanId || a.id === targetArticleIdOrSlug || a.slug === targetArticleIdOrSlug;
+              });
+              if (matched) return matched;
+            }
+          }
+        } catch {}
+        return transformLaravelPostToArticle({ id: cleanId || targetArticleIdOrSlug, judul: '' });
+      }
+    }
+    return null;
+  });
 
   // Load More / Pagination States for Search and Tag pages
   const [visibleSearchCount, setVisibleSearchCount] = useState<number>(10);
@@ -107,11 +227,7 @@ export default function App() {
   }, [selectedTag, submittedSearchQuery, searchDate]);
 
   // Bookmarks State
-  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const saved = localStorage.getItem('sinpo_bookmarks_v1');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
   const [showBookmarksOnly, setShowBookmarksOnly] = useState<boolean>(false);
 
   // Live State from Laravel REST API
@@ -120,10 +236,14 @@ export default function App() {
   const [breakingNewsList, setBreakingNewsList] = useState<string[]>([]);
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [popularNewsList, setPopularNewsList] = useState<Article[]>([]);
-  const [staticModalSlug, setStaticModalSlug] = useState<string | null>(null);
 
   // Channel list from API for dynamic category resolution (like sinpo 2 reference)
   const [channelsList, setChannelsList] = useState<any[]>([]);
+  const channelsListRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    channelsListRef.current = channelsList;
+  }, [channelsList]);
 
   // Dedicated category articles pool - accumulates paginated results for the active category
   const [categoryArticlesPool, setCategoryArticlesPool] = useState<Article[]>([]);
@@ -131,10 +251,54 @@ export default function App() {
 
   // Loading & Skeleton State (automatic initial load, reload & navigation transition)
   const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
+
+  const masterLiveArticlesRef = useRef<Article[]>([]);
+  const hasInitialFetchedRef = useRef<boolean>(false);
+
+  // Safe Post-Hydration Sync (runs ONLY on client after initial SSR hydration pass, preventing hydration mismatch)
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem('sinpo_theme');
+      if (savedTheme === 'dark') setIsDarkMode(true);
+    } catch {}
+
+    try {
+      const savedBm = localStorage.getItem('sinpo_bookmarks_v1');
+      if (savedBm) setBookmarkedIds(JSON.parse(savedBm));
+    } catch {}
+
+    try {
+      const savedMaster = localStorage.getItem('sinpo_cached_master_articles_v1');
+      if (savedMaster) {
+        const parsed = JSON.parse(savedMaster);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMasterLiveArticles(parsed);
+          setArticlesState(parsed);
+          masterLiveArticlesRef.current = parsed;
+          setIsLoadingContent(false);
+        }
+      }
+      const savedPopular = localStorage.getItem('sinpo_cached_popular_articles_v1');
+      if (savedPopular) {
+        const parsed = JSON.parse(savedPopular);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPopularNewsList(parsed);
+        }
+      }
+      const savedBreaking = localStorage.getItem('sinpo_cached_breaking_v1');
+      if (savedBreaking) {
+        const parsed = JSON.parse(savedBreaking);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setBreakingNewsList(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
   const loadingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const loadingStartTimeRef = useRef<number>(Date.now());
 
-  const triggerLoading = useCallback((minDurationMs: number = 500) => {
+  const triggerLoading = useCallback((minDurationMs: number = 150) => {
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current);
     }
@@ -142,11 +306,12 @@ export default function App() {
     setIsLoadingContent(true);
   }, []);
 
-  const finishLoading = useCallback((minDurationMs: number = 500) => {
+  const finishLoading = useCallback((minDurationMs: number = 150) => {
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current);
     }
     const elapsed = Date.now() - loadingStartTimeRef.current;
+    // Fast 0.1s - 1.0s skeleton flash (defaults to ~150ms for a brief shimmer)
     const remaining = Math.max(0, minDurationMs - elapsed);
 
     loadingTimerRef.current = setTimeout(() => {
@@ -154,10 +319,8 @@ export default function App() {
     }, remaining);
   }, []);
 
-  const masterLiveArticlesRef = useRef<Article[]>([]);
-
   // Real-Time Live News Fetcher & Auto Polling
-  const fetchLiveData = useCallback(async () => {
+  const fetchLiveData = useCallback(async (isInitial: boolean = false) => {
     try {
       const [headlineRes, response] = await Promise.all([
         apiFetch('/headline?limit=1').catch(() => null),
@@ -165,7 +328,7 @@ export default function App() {
       ]);
 
       if (response && response.success && Array.isArray(response.data)) {
-        // Filter out takedown/scheduled articles from raw API data (matching sinpo 2 isTakedownArticle filter)
+        // Filter out takedown/scheduled articles from raw API data
         const cleanRawData = response.data.filter((item: any) => item && !isTakedownArticle(item));
         const liveArticles = cleanRawData.map(transformLaravelPostToArticle);
         
@@ -180,13 +343,12 @@ export default function App() {
             return timeB - timeA;
           });
 
-          // Check if CMS has active headline articles from /headline endpoint or /berita items (matching sinpo 2 algorithm)
+          // Check if CMS has active headline articles from /headline endpoint or /berita items
           let headlineArt: Article | null = null;
 
           if (headlineRes && headlineRes.success && Array.isArray(headlineRes.data) && headlineRes.data.length > 0) {
             const cleanHeadlines = headlineRes.data.filter((item: any) => item && !isTakedownArticle(item));
             if (cleanHeadlines.length > 0) {
-              // Sort headline articles strictly newest-first to get the latest CMS headline
               const transformedHeadlines = cleanHeadlines.map(transformLaravelPostToArticle);
               transformedHeadlines.sort((a, b) => {
                 const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
@@ -213,7 +375,7 @@ export default function App() {
             validArticles = [headlineArt, ...remaining];
           }
 
-          // Merge fresh live articles into existing master live pool so older paginated articles are NEVER wiped out
+          // Merge fresh live articles into existing master live pool
           setMasterLiveArticles(prev => {
             const existingIds = new Set(validArticles.map(a => a.id));
             const oldHistorical = prev.filter(a => !existingIds.has(a.id));
@@ -224,43 +386,60 @@ export default function App() {
               return timeB - timeA;
             });
             masterLiveArticlesRef.current = merged;
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('sinpo_cached_master_articles_v1', JSON.stringify(merged.slice(0, 100)));
+              } catch {}
+            }
             return merged;
           });
 
           // Also merge into active articlesState without wiping out older paginated articles
-          if (!selectedCategory || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') {
-            setArticlesState(prev => {
-              const existingIds = new Set(validArticles.map(a => a.id));
-              const oldHistorical = prev.filter(a => !existingIds.has(a.id));
-              const merged = [...validArticles, ...oldHistorical];
-              merged.sort((a, b) => {
-                const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
-                const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
-                return timeB - timeA;
-              });
-              return merged;
+          setArticlesState(prev => {
+            const existingIds = new Set(validArticles.map(a => a.id));
+            const oldHistorical = prev.filter(a => !existingIds.has(a.id));
+            const merged = [...validArticles, ...oldHistorical];
+            merged.sort((a, b) => {
+              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+              return timeB - timeA;
             });
-          }
+            return merged;
+          });
 
           // Update Breaking Ticker from top 5 newest items
           const recentTicker = validArticles.slice(0, 5).map(a => `${a.category}: ${a.title}`);
           setBreakingNewsList(recentTicker);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('sinpo_cached_breaking_v1', JSON.stringify(recentTicker));
+            } catch {}
+          }
 
           // Derive Popular News from highest viewed recent articles
           const sortedByPopularity = [...validArticles].sort((a, b) => (b.views || 0) - (a.views || 0));
-          setPopularNewsList(sortedByPopularity.slice(0, 5));
+          const topPopular = sortedByPopularity.slice(0, 5);
+          setPopularNewsList(topPopular);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('sinpo_cached_popular_articles_v1', JSON.stringify(topPopular));
+            } catch {}
+          }
         }
       }
     } catch (err) {
       console.log('SinPo Live REST API /berita notice:', err);
     }
-  }, [selectedCategory]);
+  }, []);
 
   useEffect(() => {
-    // Initial fetch
-    fetchLiveData().then(() => {
-      finishLoading(500);
-    });
+    // Initial fetch once on mount
+    if (!hasInitialFetchedRef.current) {
+      hasInitialFetchedRef.current = true;
+      fetchLiveData(true).then(() => {
+        finishLoading(150);
+      });
+    }
 
     // Fetch categories
     async function fetchCategories() {
@@ -276,12 +455,13 @@ export default function App() {
     }
     fetchCategories();
 
-    // Fetch channels list for dynamic channel ID resolution (like sinpo 2 reference)
+    // Fetch channels list for dynamic channel ID resolution
     async function fetchChannels() {
       try {
         const chanRes = await apiFetch('/channel?limit=100');
         if (chanRes.success && Array.isArray(chanRes.data)) {
           setChannelsList(chanRes.data);
+          channelsListRef.current = chanRes.data;
         }
       } catch (err) {
         console.log('SinPo REST API /channel notice:', err);
@@ -289,15 +469,15 @@ export default function App() {
     }
     fetchChannels();
 
-    // Setup 30-second real-time auto polling to fetch newest news continuously (silent background update)
+    // Setup 30-second real-time auto polling
     const interval = setInterval(() => {
-      fetchLiveData();
+      fetchLiveData(false);
     }, 30000);
 
     return () => clearInterval(interval);
   }, [fetchLiveData, finishLoading]);
 
-  // Category pagination state for continuous historical loading (exact algorithm from sinpo 2)
+  // Category pagination state for continuous historical loading
   const categoryPageRef = useRef<number>(1);
   const [hasMoreCategoryNews, setHasMoreCategoryNews] = useState<boolean>(true);
   const isFetchingCategoryRef = useRef<boolean>(false);
@@ -312,8 +492,8 @@ export default function App() {
     setHasMoreCategoryNews(true);
     isFetchingCategoryRef.current = false;
 
-    // Trigger smooth loading skeleton for any page entrance/change (400ms duration)
-    triggerLoading(400);
+    // Trigger smooth loading skeleton for any page entrance/change (150ms duration)
+    triggerLoading(150);
 
     // Reset category pool and seen IDs when switching categories
     setCategoryArticlesPool([]);
@@ -326,10 +506,10 @@ export default function App() {
         : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
       if (liveList.length > 0) {
         setArticlesState(liveList);
-        if (isMounted) finishLoading(400);
+        if (isMounted) finishLoading(150);
       } else {
-        fetchLiveData().then(() => {
-          if (isMounted) finishLoading(400);
+        fetchLiveData(false).then(() => {
+          if (isMounted) finishLoading(150);
         });
       }
       return;
@@ -338,8 +518,25 @@ export default function App() {
     async function fetchFilteredNews() {
       try {
         if (selectedCategory && selectedCategory !== 'SEMUA' && selectedCategory !== 'INDEKS' && !submittedSearchQuery && !selectedTag) {
-          // B. CATEGORY FILTER: Use channel parameter (like sinpo 2 reference)
-          const channelId = resolveChannelId(selectedCategory, channelsList);
+          // B. CATEGORY FILTER: Check cache & master list for 0ms instant display
+          const cached = categoryArticlesCache.get(selectedCategory);
+          if (cached && cached.length > 0) {
+            setCategoryArticlesPool(cached);
+            setArticlesState(cached);
+            if (isMounted) finishLoading(150);
+          } else {
+            const masterPool = masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : masterLiveArticles;
+            const initialArticles = getInitialCategoryArticlesFromMaster(selectedCategory, masterPool);
+            if (initialArticles.length > 0) {
+              setCategoryArticlesPool(initialArticles);
+              setArticlesState(initialArticles);
+              if (isMounted) finishLoading(150);
+            }
+          }
+
+          // Fetch fresh category articles from API in background
+          const activeChannels = channelsListRef.current.length > 0 ? channelsListRef.current : channelsList;
+          const channelId = resolveChannelId(selectedCategory, activeChannels);
           const endpoint = getCategoryEndpoint(selectedCategory, 1, channelId);
           
           let categoryArticles: Article[] = [];
@@ -371,16 +568,13 @@ export default function App() {
 
           if (categoryArticles.length > 0) {
             categoryArticles[0].isHero = true;
+            categoryArticlesCache.set(selectedCategory, categoryArticles);
           }
 
-          if (isMounted) {
-            // Register seen IDs
+          if (isMounted && categoryArticles.length > 0) {
             categorySeenIdsRef.current = new Set(categoryArticles.map(a => a.id));
-            // Set pagination to page 2 for next load-more
             categoryPageRef.current = 2;
-            // Check if there might be more pages
             setHasMoreCategoryNews(categoryArticles.length >= 20);
-            // Store in dedicated category pool
             setCategoryArticlesPool(categoryArticles);
             setArticlesState(categoryArticles);
           }
@@ -432,7 +626,7 @@ export default function App() {
         console.log('Filtered news API fetch notice:', err);
       } finally {
         if (isMounted) {
-          finishLoading(500);
+          finishLoading(150);
         }
       }
     }
@@ -442,7 +636,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [submittedSearchQuery, selectedCategory, selectedTag, channelsList, navNonce]);
+  }, [submittedSearchQuery, selectedCategory, selectedTag, navNonce]);
 
   // Load next page of category historical articles from backend API (exact sinpo 2 algorithm)
   const handleLoadMoreCategoryArticles = useCallback(async (attempts: number = 0) => {
@@ -605,13 +799,12 @@ export default function App() {
     return () => { isMounted = false; };
   }, [articlesState]);
 
-  // Selected Article for the Reader Modal
-  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
+  // Selected Article Reader Modal Handlers
 
   const homeScrollPosRef = React.useRef<number>(0);
 
   const handleSelectArticle = (article: Article | null, forceScrollToTop: boolean = false, skipPushState: boolean = false) => {
-    triggerLoading(500);
+    triggerLoading(150);
     if (article) {
       if (!selectedArticle) {
         homeScrollPosRef.current = window.scrollY;
@@ -620,11 +813,17 @@ export default function App() {
       setSelectedArticle(article);
       window.scrollTo({ top: 0, behavior: 'auto' });
 
+      // Instantly prefetch article detail API using fast numeric ID index
+      const numericId = getNumericId(article.id) || article.id.replace('laravel-', '');
+      if (numericId) {
+        apiFetch(`/berita/${numericId}`).catch(() => null);
+      }
+
       if (!skipPushState && typeof window !== 'undefined') {
         const url = getArticleUrl(article);
         window.history.pushState({ type: 'article', id: article.id }, '', url);
       }
-      finishLoading(500);
+      finishLoading(150);
     } else {
       setSelectedArticle(null);
       setStaticModalSlug(null);
@@ -659,7 +858,7 @@ export default function App() {
     setSelectedTag(null);
     setSearchQuery("");
     setSearchDate("");
-    triggerLoading(500);
+    triggerLoading(150);
     setNavNonce((prev) => prev + 1);
 
     if (!skipPushState && typeof window !== 'undefined') {
@@ -674,7 +873,7 @@ export default function App() {
     setSelectedArticle(null);
     setSelectedTag(null);
     setSearchDate("");
-    triggerLoading(500);
+    triggerLoading(150);
     setNavNonce((prev) => prev + 1);
 
     if (!skipPushState && typeof window !== 'undefined') {
@@ -692,7 +891,7 @@ export default function App() {
     setSelectedArticle(null);
     setStaticModalSlug(null);
     setSubmittedSearchQuery(null);
-    triggerLoading(500);
+    triggerLoading(150);
     setNavNonce((prev) => prev + 1);
 
     if (!skipPushState && typeof window !== 'undefined') {
@@ -709,7 +908,7 @@ export default function App() {
     if (originArt) {
       // Return to the exact article detail page where tag was clicked
       setSelectedArticle(originArt);
-      triggerLoading(300);
+      triggerLoading(150);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       if (typeof window !== 'undefined') {
         const url = getArticleUrl(originArt);
@@ -719,7 +918,7 @@ export default function App() {
       // Fallback: Return to homepage
       setSelectedCategory("SEMUA");
       setNavNonce((prev) => prev + 1);
-      triggerLoading(300);
+      triggerLoading(150);
       if (typeof window !== 'undefined') {
         window.history.pushState({ type: 'list' }, '', '/');
       }
@@ -727,7 +926,7 @@ export default function App() {
   };
 
   const handleStaticPageSelect = (slug: string, skipPushState: boolean = false) => {
-    triggerLoading(500);
+    triggerLoading(150);
     setStaticModalSlug(slug);
     setSelectedArticle(null);
     setSelectedCategory("SEMUA");
@@ -742,92 +941,16 @@ export default function App() {
       const url = getStaticPageUrl(slug);
       window.history.pushState({ type: 'static_page', slug }, '', url);
     }
-    finishLoading(500);
+    finishLoading(150);
   };
 
-  const parseArticleTargetFromUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined') return null;
 
-    const pathname = window.location.pathname;
-    const detailMatch = pathname.match(/^\/detail\/([^\/]+)/);
-    if (detailMatch && detailMatch[1]) {
-      return detailMatch[1];
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const articleParam = params.get('article');
-    if (articleParam) {
-      return articleParam;
-    }
-
-    return null;
-  }, []);
-
-  const parseStaticPageTargetFromUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined') return null;
-
-    const pathname = window.location.pathname;
-    const statisMatch = pathname.match(/^\/(?:halaman|statis)\/(?:[0-9]+\/)?([^\/]+)/);
-    if (statisMatch && statisMatch[1]) {
-      return decodeURIComponent(statisMatch[1]);
-    }
-
-    const singleMatch = pathname.match(/^\/(?:halaman|statis)\/([0-9]+)/);
-    if (singleMatch && singleMatch[1]) {
-      return singleMatch[1];
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const pageParam = params.get('page') || params.get('modal');
-    if (pageParam) {
-      return pageParam;
-    }
-
-    return null;
-  }, []);
-
-  const parseCategoryTargetFromUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined') return null;
-
-    const pathname = window.location.pathname;
-    const kanalMatch = pathname.match(/^\/(?:kanal|kategori)\/([^\/]+)/);
-    if (kanalMatch && kanalMatch[1]) {
-      const decoded = decodeURIComponent(kanalMatch[1]).replace(/-/g, ' ').toUpperCase();
-      return decoded;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const categoryParam = params.get('category');
-    if (categoryParam) {
-      return decodeURIComponent(categoryParam).toUpperCase();
-    }
-
-    return null;
-  }, []);
-
-  const parseTagTargetFromUrl = useCallback((): string | null => {
-    if (typeof window === 'undefined') return null;
-
-    const pathname = window.location.pathname;
-    const tagMatch = pathname.match(/^\/(?:tag|tagar)\/([^\/]+)/);
-    if (tagMatch && tagMatch[1]) {
-      return decodeURIComponent(tagMatch[1]).replace(/-/g, ' ');
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const tagParam = params.get('tag');
-    if (tagParam) {
-      return decodeURIComponent(tagParam);
-    }
-
-    return null;
-  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const handlePopState = () => {
-      triggerLoading(500);
+      triggerLoading(150);
 
       const targetArticleIdOrSlug = parseArticleTargetFromUrl();
       const targetStaticPageSlug = parseStaticPageTargetFromUrl();
@@ -855,7 +978,7 @@ export default function App() {
           if (window.location.search.includes('article=')) {
             window.history.replaceState({ type: 'article', id: matched.id }, '', cleanUrl);
           }
-          finishLoading(500);
+          finishLoading(150);
         } else {
           apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
             .then((res) => {
@@ -868,11 +991,11 @@ export default function App() {
               } else {
                 setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
               }
-              finishLoading(500);
+              finishLoading(150);
             })
             .catch(() => {
               setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
-              finishLoading(500);
+              finishLoading(150);
             });
         }
       } else if (targetStaticPageSlug) {
@@ -883,7 +1006,7 @@ export default function App() {
         if (window.location.search.includes('page=') || window.location.search.includes('modal=')) {
           window.history.replaceState({ type: 'static_page', slug: targetStaticPageSlug }, '', getStaticPageUrl(targetStaticPageSlug));
         }
-        finishLoading(500);
+        finishLoading(150);
       } else if (targetCategory) {
         setSelectedArticle(null);
         setStaticModalSlug(null);
@@ -894,7 +1017,7 @@ export default function App() {
           window.history.replaceState({ type: 'category', category: targetCategory }, '', getCategoryUrl(targetCategory));
         }
         setNavNonce((prev) => prev + 1);
-        finishLoading(500);
+        finishLoading(150);
       } else if (targetTag) {
         setSelectedArticle(null);
         setStaticModalSlug(null);
@@ -904,7 +1027,7 @@ export default function App() {
           window.history.replaceState({ type: 'tag', tag: targetTag }, '', getTagUrl(targetTag));
         }
         setNavNonce((prev) => prev + 1);
-        finishLoading(500);
+        finishLoading(150);
       } else {
         setSelectedArticle(null);
         setStaticModalSlug(null);
@@ -919,7 +1042,7 @@ export default function App() {
         }
 
         setNavNonce((prev) => prev + 1);
-        finishLoading(500);
+        finishLoading(150);
       }
     };
 
@@ -927,7 +1050,7 @@ export default function App() {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl, parseTagTargetFromUrl]);
+  }, [triggerLoading, finishLoading, articlesState, masterLiveArticles]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -940,13 +1063,28 @@ export default function App() {
     const searchParam = params.get('q');
 
     if (targetArticleIdOrSlug) {
-      triggerLoading(500);
-      setIsLoadingContent(true);
+      triggerLoading(150);
       const cleanId = getNumericId(targetArticleIdOrSlug);
       
-      // Set temporary placeholder to avoid null reference crashes during initial render
-      const tempId = cleanId || targetArticleIdOrSlug;
-      setSelectedArticle((prev) => prev || transformLaravelPostToArticle({ id: tempId, judul: '' }));
+      // Match against master pool first for 0ms instant detail display
+      const pool = masterLiveArticlesRef.current.length > 0 
+        ? masterLiveArticlesRef.current 
+        : (masterLiveArticles.length > 0 ? masterLiveArticles : articlesState);
+
+      const matched = pool.find((a) => {
+        const aNumId = getNumericId(a.id);
+        return aNumId === cleanId || a.id === targetArticleIdOrSlug || a.id === `laravel-${cleanId}` || a.slug === targetArticleIdOrSlug;
+      });
+
+      if (matched) {
+        setSelectedArticle(matched);
+        setIsLoadingContent(false);
+        finishLoading(150);
+      } else {
+        // Temporary placeholder to avoid null reference crashes while fetching
+        const tempId = cleanId || targetArticleIdOrSlug;
+        setSelectedArticle((prev) => prev || transformLaravelPostToArticle({ id: tempId, judul: '' }));
+      }
 
       apiFetch(`/berita/${encodeURIComponent(cleanId || targetArticleIdOrSlug)}`)
         .then((res) => {
@@ -961,19 +1099,19 @@ export default function App() {
             setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           }
           setIsLoadingContent(false);
-          finishLoading(500);
+          finishLoading(150);
         })
         .catch(() => {
           setSelectedArticle(transformLaravelPostToArticle({ id: targetArticleIdOrSlug, judul: 'Berita Tidak Ditemukan' }));
           setIsLoadingContent(false);
-          finishLoading(500);
+          finishLoading(150);
         });
     } else if (targetStaticPageSlug) {
       setStaticModalSlug(targetStaticPageSlug);
       if (window.location.search.includes('page=') || window.location.search.includes('modal=')) {
         window.history.replaceState({ type: 'static_page', slug: targetStaticPageSlug }, '', getStaticPageUrl(targetStaticPageSlug));
       }
-      triggerLoading(500);
+      triggerLoading(150);
     } else if (targetCategory) {
       setSelectedCategory(targetCategory);
       if (window.location.search.includes('category=')) {
@@ -989,11 +1127,7 @@ export default function App() {
     }
   }, [triggerLoading, finishLoading, parseArticleTargetFromUrl, parseStaticPageTargetFromUrl, parseCategoryTargetFromUrl, parseTagTargetFromUrl]);
 
-  const [myCommentIds, setMyCommentIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    const saved = localStorage.getItem('sinpo_my_comment_ids_v1');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [myCommentIds, setMyCommentIds] = useState<string[]>([]);
 
   // Sync myCommentIds changes with localStorage
   useEffect(() => {

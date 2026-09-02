@@ -378,9 +378,18 @@ export default function Sidebar({
 
             if (listToRender.length === 0) {
               return (
-                <p className="text-xs text-slate-400 font-sans italic py-2">
-                  Belum ada berita terpopuler.
-                </p>
+                <div className="flex flex-col gap-4">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex gap-3 items-start pb-3 border-b border-slate-100 dark:border-slate-900/50 last:border-b-0 last:pb-0">
+                      <Skeleton className="w-9 md:w-11 h-9 rounded-xs shrink-0" />
+                      <div className="flex flex-col gap-1 min-w-0 flex-1">
+                        <Skeleton className="h-3 w-16 rounded-xs" />
+                        <Skeleton className="h-4 w-full rounded-sm" />
+                        <Skeleton className="h-4 w-4/5 rounded-sm" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               );
             }
 

@@ -1,39 +1,93 @@
 import type { Metadata } from 'next';
 import App from '../../../src/App';
+import { transformLaravelPostToArticle } from '../../../src/lib/apiClient';
+import { Article } from '../../../src/types';
 
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
+// Node.js Server-side In-Memory Cache for ultra-fast SSR responses (< 10ms)
+const serverArticleMemoryCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes cache
+
+function extractNumericId(idOrSlug: string): string {
+  if (!idOrSlug) return '';
+  const str = String(idOrSlug).trim();
+  const match = str.match(/\d+/);
+  return match ? match[0] : str;
+}
+
 async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
+  if (!articleIdOrSlug) return null;
+
+  const cacheKey = articleIdOrSlug.trim();
+  const now = Date.now();
+
+  // 1. Instant 0ms memory cache hit
+  if (serverArticleMemoryCache.has(cacheKey)) {
+    const cached = serverArticleMemoryCache.get(cacheKey)!;
+    if (now - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
+  const cleanNumericId = extractNumericId(articleIdOrSlug);
+  const targetId = cleanNumericId || articleIdOrSlug;
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${API_TOKEN}`,
   };
 
-  // 1. Try standard REST endpoint: /api/berita/${articleIdOrSlug}
-  try {
-    const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}`, {
-      next: { revalidate: 60 },
-      headers,
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const item = json?.data || json?.result || json;
-      if (item && (item.judul || item.title)) return item;
-    }
-  } catch (e) {}
+  // Fast AbortController to limit HTTP request duration to 1200ms max
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 1200);
 
-  // 2. Try fallback query: /api/berita/detail?id=${articleIdOrSlug}
   try {
-    const res = await fetch(`https://api.sinpo.id/api/berita/detail?id=${articleIdOrSlug}`, {
-      next: { revalidate: 60 },
+    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
+      next: { revalidate: 600 },
       headers,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
     if (res.ok) {
       const json = await res.json();
       const item = json?.data || json?.result || json;
-      if (item && (item.judul || item.title)) return item;
+      if (item && (item.judul || item.title)) {
+        serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
+        if (cleanNumericId && cleanNumericId !== cacheKey) {
+          serverArticleMemoryCache.set(cleanNumericId, { data: item, timestamp: now });
+        }
+        return item;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    clearTimeout(timeoutId);
+  }
+
+  // 2. Fast Fallback Query
+  if (cleanNumericId && cleanNumericId !== articleIdOrSlug) {
+    const fallbackController = new AbortController();
+    const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 800);
+    try {
+      const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}`, {
+        next: { revalidate: 600 },
+        headers,
+        signal: fallbackController.signal,
+      });
+      clearTimeout(fallbackTimeoutId);
+      if (res.ok) {
+        const json = await res.json();
+        const item = json?.data || json?.result || json;
+        if (item && (item.judul || item.title)) {
+          serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
+          return item;
+        }
+      }
+    } catch (e) {
+      clearTimeout(fallbackTimeoutId);
+    }
+  }
 
   return null;
 }
@@ -183,11 +237,14 @@ export default async function DetailCatchAllPage(props: {
   const articleId = slugArray[0];
 
   let jsonLdNewsArticle: Record<string, any> | null = null;
+  let initialArticle: Article | null = null;
 
   if (articleId) {
     const item = await fetchArticleDetailFromApi(articleId);
 
     if (item && (item.judul || item.title)) {
+      initialArticle = transformLaravelPostToArticle(item);
+
       const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
       const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
       let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
@@ -236,6 +293,9 @@ export default async function DetailCatchAllPage(props: {
         'isAccessibleForFree': true,
         'inLanguage': 'id-ID',
       };
+    } else {
+      const cleanId = extractNumericId(articleId);
+      initialArticle = transformLaravelPostToArticle({ id: cleanId || articleId, judul: '' });
     }
   }
 
@@ -248,7 +308,7 @@ export default async function DetailCatchAllPage(props: {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdNewsArticle) }}
         />
       )}
-      <App />
+      <App initialArticle={initialArticle} />
     </>
   );
 }

@@ -32,16 +32,68 @@ export interface FetchOptions extends RequestInit {
   token?: string;
   revalidate?: number | false;
   skipCacheBuster?: boolean;
+  forceRefresh?: boolean;
+  cacheTtlMs?: number;
+}
+
+// In-memory cache & request deduplication store for SinPo API calls
+interface ApiCacheEntry<T> {
+  data: ApiResponse<T>;
+  timestamp: number;
+}
+
+const apiMemoryCache = new Map<string, ApiCacheEntry<any>>();
+const inflightApiRequests = new Map<string, Promise<ApiResponse<any>>>();
+const DEFAULT_CACHE_TTL_MS = 15000; // 15 seconds memory cache
+
+export function clearApiCache(endpointPattern?: string) {
+  if (!endpointPattern) {
+    apiMemoryCache.clear();
+    return;
+  }
+  for (const key of apiMemoryCache.keys()) {
+    if (key.includes(endpointPattern)) {
+      apiMemoryCache.delete(key);
+    }
+  }
 }
 
 /**
- * Core fetch wrapper for SinPo.id REST API with real-time cache busting
+ * Core fetch wrapper for SinPo.id REST API with real-time cache busting,
+ * inflight request deduplication, and memory caching for ultra-fast loading.
  */
 export async function apiFetch<T = any>(
   endpoint: string,
   options: FetchOptions = {}
 ): Promise<ApiResponse<T>> {
-  const { token = API_TOKEN, revalidate = 0, headers, skipCacheBuster = false, ...customConfig } = options;
+  const {
+    token = API_TOKEN,
+    revalidate = 0,
+    headers,
+    skipCacheBuster = false,
+    forceRefresh = false,
+    cacheTtlMs = DEFAULT_CACHE_TTL_MS,
+    ...customConfig
+  } = options;
+
+  const isGetRequest = !customConfig.method || customConfig.method.toUpperCase() === 'GET';
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  
+  // Clean cache key (strip cache-busting _t timestamp parameter for key matching)
+  const cacheKey = cleanEndpoint.replace(/([?&])_t=\d+/g, '').replace(/(\?|&)$/, '');
+
+  // 1. Serve from in-memory cache if available, valid, and not forced to refresh
+  if (isGetRequest && !forceRefresh) {
+    const cached = apiMemoryCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < cacheTtlMs)) {
+      return cached.data;
+    }
+  }
+
+  // 2. Request Deduplication: Reuse inflight fetch promise if an identical GET request is currently pending
+  if (isGetRequest && !forceRefresh && inflightApiRequests.has(cacheKey)) {
+    return inflightApiRequests.get(cacheKey)!;
+  }
 
   const requestHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -54,38 +106,57 @@ export async function apiFetch<T = any>(
     requestHeaders['X-Api-Key'] = token;
   }
 
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  
-  // Append cache-buster _t=timestamp for GET requests to ensure real-time news
+  // Append cache-buster _t=timestamp for GET requests when actually making network call
   let url = `${API_BASE_URL}${cleanEndpoint}`;
-  if (!skipCacheBuster && (!customConfig.method || customConfig.method.toUpperCase() === 'GET')) {
+  if (!skipCacheBuster && isGetRequest) {
     const separator = url.includes('?') ? '&' : '?';
     url = `${url}${separator}_t=${Date.now()}`;
   }
 
   const fetchConfig: RequestInit = {
-    cache: 'no-store', // Always get fresh data from network
+    cache: 'no-store', // Always get fresh data from network when fetching
     ...customConfig,
     headers: requestHeaders,
   };
 
-  try {
-    const res = await fetch(url, fetchConfig);
-    if (!res.ok) {
-      const apiError: any = new Error(`HTTP error! status: ${res.status}`);
-      apiError.status = res.status;
-      apiError.isNotFound = res.status === 404;
-      throw apiError;
+  const fetchPromise = (async (): Promise<ApiResponse<T>> => {
+    try {
+      const res = await fetch(url, fetchConfig);
+      if (!res.ok) {
+        const apiError: any = new Error(`HTTP error! status: ${res.status}`);
+        apiError.status = res.status;
+        apiError.isNotFound = res.status === 404;
+        throw apiError;
+      }
+      const data: ApiResponse<T> = await res.json();
+      if (data.success === false) {
+        throw new Error(data.message || 'API request failed');
+      }
+
+      // Store in memory cache for GET requests
+      if (isGetRequest && data) {
+        apiMemoryCache.set(cacheKey, {
+          data,
+          timestamp: Date.now(),
+        });
+      }
+
+      return data;
+    } catch (err: any) {
+      console.warn(`apiFetch notice [${cleanEndpoint}]:`, err?.message || err);
+      throw err;
+    } finally {
+      if (isGetRequest) {
+        inflightApiRequests.delete(cacheKey);
+      }
     }
-    const data: ApiResponse<T> = await res.json();
-    if (data.success === false) {
-      throw new Error(data.message || 'API request failed');
-    }
-    return data;
-  } catch (err: any) {
-    console.warn(`apiFetch notice [${cleanEndpoint}]:`, err?.message || err);
-    throw err;
+  })();
+
+  if (isGetRequest) {
+    inflightApiRequests.set(cacheKey, fetchPromise);
   }
+
+  return fetchPromise;
 }
 
 /**
@@ -365,7 +436,9 @@ export function transformLaravelPostToArticle(item: any): Article {
   // Summary & Content resolution
   const rawContent = fixContentImages(item.isi || item.content || '');
   const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || '';
-  const cleanSummary = stripHtml(rawSummary) || (rawContent ? stripHtml(rawContent).slice(0, 180) : '');
+  const dedicatedSummary = stripHtml(rawSummary).trim();
+  const fallbackSummary = rawContent ? stripHtml(rawContent).slice(0, 180) : '';
+  const cleanSummary = dedicatedSummary || fallbackSummary;
 
   // Tags resolution
   const rawTags = item.tag || item.tags || '';
@@ -435,7 +508,7 @@ export function transformLaravelPostToArticle(item: any): Article {
     id: `laravel-${rawId}`,
     slug: item.slug || '',
     title,
-    subtitle: cleanSummary,
+    subtitle: dedicatedSummary,
     summary: cleanSummary,
     content: rawContent,
     category: categoryName,

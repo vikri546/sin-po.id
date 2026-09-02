@@ -51,6 +51,13 @@ export async function generateMetadata(props: {
   };
 }
 
-export default function KanalCatchAllPage() {
-  return <App />;
+export default async function KanalCatchAllPage(props: {
+  params: Promise<{ slug?: string[] }>;
+}) {
+  const params = await props.params;
+  const slugArray = params?.slug || [];
+  const rawKanal = slugArray[0] || 'SEMUA';
+  const cleanKanal = rawKanal.replace(/-/g, ' ').toUpperCase();
+
+  return <App initialCategory={cleanKanal} />;
 }

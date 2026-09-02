@@ -151,12 +151,17 @@ export default function NewsGrid({
   const gridArticles = articles.filter(a => a.id !== heroArticle?.id).slice(0, 6);
 
   if (articles.length === 0) {
-    if (isLoading) {
+    if (isLoading || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') {
       return (
         <div className="flex flex-col gap-6 w-full animate-fade-in">
           <div className="relative rounded-[5px] overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-lg">
             <div className="relative h-[480px] md:h-[580px] w-full overflow-hidden rounded-[5px]">
               <Skeleton className="w-full h-full rounded-[5px]" />
+              <div className="absolute bottom-3 inset-x-3 py-3 px-4 md:p-6 bg-slate-200/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-[5px] flex flex-col gap-2">
+                <Skeleton className="h-4 w-32 rounded-xs" />
+                <Skeleton className="h-7 w-full rounded-sm" />
+                <Skeleton className="h-7 w-4/5 rounded-sm" />
+              </div>
             </div>
           </div>
         </div>
@@ -205,6 +210,9 @@ export default function NewsGrid({
               src={heroArticle.imageUrl}
               alt={heroArticle.title}
               referrerPolicy="no-referrer"
+              fetchPriority="high"
+              loading="eager"
+              decoding="async"
               className="h-full w-full object-cover rounded-[5px]"
             />
             {/* Soft gradient overlay for text readability */}

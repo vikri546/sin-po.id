@@ -51,6 +51,12 @@ export async function generateMetadata(props: {
   };
 }
 
-export default function StatisCatchAllPage() {
-  return <App />;
+export default async function StatisCatchAllPage(props: {
+  params: Promise<{ slug?: string[] }>;
+}) {
+  const params = await props.params;
+  const slugArray = params?.slug || [];
+  const slug = slugArray[slugArray.length - 1] || null;
+
+  return <App initialStaticSlug={slug} />;
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, MoreHorizontal } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
-import { getArticleUrl, getTagUrl } from '@/lib/urlHelpers';
+import { getArticleUrl, getTagUrl, getNumericId } from '@/lib/urlHelpers';
 
 interface ArticleDetailViewProps {
   article: Article;
@@ -24,6 +24,23 @@ import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
 import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter, getStorageUrl } from '../lib/apiClient';
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
+
+// In-memory cache for fetched article detail body HTML
+const articleContentMemoryCache = new Map<string, string>();
+
+const buildInitialContent = (art: Article | null): string => {
+  if (!art) return '';
+  if (art.id && articleContentMemoryCache.has(art.id)) {
+    return articleContentMemoryCache.get(art.id)!;
+  }
+  const best = art.content || (art as any)?.isi || art.summary || art.subtitle || '';
+  const cleanBest = stripHtml(best).trim();
+  if (cleanBest.length >= 25) {
+    return best;
+  }
+  const cat = (art.category || 'POLITIK').toUpperCase();
+  return `<p><strong>SinPo.id - </strong><sup>${cat}</sup> - ${art.title}. Simak ulasan berita selengkapnya dan informasi terkini perihal ${art.title} selengkapnya di portal berita SinPo.id Matahari Indonesia.</p>`;
+};
 
 const calculateSpeechDuration = (title?: string, author?: string, content?: string): number => {
   const safeTitle = title || '';
@@ -49,7 +66,7 @@ export default function ArticleDetailView({
   onSelectTag,
   isLoading = false
 }: ArticleDetailViewProps) {
-  if (isLoading) {
+  if (isLoading && (!article || !article.title)) {
     return (
       <article className="w-full flex flex-col gap-8 animate-fade-in">
         <div className="flex flex-col gap-6">
@@ -131,7 +148,19 @@ export default function ArticleDetailView({
   const [isDragging, setIsDragging] = useState(false);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
-  const [fullContent, setFullContent] = useState<string>(article?.content || article?.summary || article?.subtitle || '');
+  const [fullContent, setFullContent] = useState<string>(() => {
+    if (article?.id && articleContentMemoryCache.has(article.id)) {
+      return articleContentMemoryCache.get(article.id)!;
+    }
+    return article?.content || (article as any)?.isi || article?.summary || article?.subtitle || '';
+  });
+  const [isFetchingDetail, setIsFetchingDetail] = useState<boolean>(() => {
+    if (article?.id && articleContentMemoryCache.has(article.id)) {
+      return false;
+    }
+    const existing = article?.content || (article as any)?.isi || '';
+    return stripHtml(existing).trim().length < 80;
+  });
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // Initialize duration dynamically based on word count whenever article changes
@@ -146,7 +175,16 @@ export default function ArticleDetailView({
 
   useEffect(() => {
     if (!article) return;
-    setFullContent(article.content || article.summary || article.subtitle || '');
+    if (article.id && articleContentMemoryCache.has(article.id)) {
+      const cached = articleContentMemoryCache.get(article.id)!;
+      setFullContent(cached);
+      setIsFetchingDetail(false);
+    } else {
+      const bestContent = article.content || (article as any)?.isi || article.summary || article.subtitle || '';
+      setFullContent(bestContent);
+      const textLen = stripHtml(bestContent).trim().length;
+      setIsFetchingDetail(textLen < 80);
+    }
   }, [article?.id, article?.content]);
 
   // Dynamic NewsArticle JSON-LD Structured Data for Google Rich Results
@@ -213,12 +251,19 @@ export default function ArticleDetailView({
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
   useEffect(() => {
-    if (article?.galleryImages && article.galleryImages.length > 0) {
-      setLiveGalleryImages(article.galleryImages);
-    }
+    setLiveGalleryImages(article?.galleryImages || []);
+    setActiveImageIndex(0);
   }, [article?.id, article?.galleryImages]);
 
   const allGalleryImages = React.useMemo(() => {
+    const category = (article?.category || '').toUpperCase().trim();
+    const isGalleryCategory = category === 'GALERI' || category === 'FOTO';
+
+    // If this article is NOT from GALERI/FOTO category and has no explicit gallery images, ALWAYS treat as single-image article
+    if (!isGalleryCategory && (!article?.galleryImages || article.galleryImages.length === 0)) {
+      return article?.imageUrl ? [article.imageUrl] : [];
+    }
+
     const list: string[] = [];
     if (article?.imageUrl && !article.imageUrl.includes('placehold.co')) {
       list.push(article.imageUrl);
@@ -229,7 +274,7 @@ export default function ArticleDetailView({
       }
     });
     return list;
-  }, [article?.imageUrl, liveGalleryImages]);
+  }, [article?.id, article?.category, article?.imageUrl, article?.galleryImages, liveGalleryImages]);
 
   const [showCopyTooltip, setShowCopyTooltip] = useState(false);
   const handleCopyLink = () => {
@@ -284,7 +329,8 @@ export default function ArticleDetailView({
     setIsArticleNotFound(false);
 
     const rawId = article.id.replace('laravel-', '');
-    const targetIdOrSlug = (article as any).slug || rawId;
+    const numericId = getNumericId(article.id) || rawId;
+    const targetIdOrSlug = numericId || (article as any).slug || rawId;
 
     let hasIncrementedCounter = false;
 
@@ -323,10 +369,14 @@ export default function ArticleDetailView({
             return Math.max(currentMax, fetchedCount);
           });
 
-          // 2. Content / Isi — live edit sync
+          // 2. Content / Isi — live edit sync & memory caching
           const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
           if (fetchedContent) {
+            if (article?.id) {
+              articleContentMemoryCache.set(article.id, fetchedContent);
+            }
             setFullContent(fetchedContent);
+            setIsFetchingDetail(false);
           }
 
           // 3. Title — live edit sync (only on polling, not initial)
@@ -345,7 +395,11 @@ export default function ArticleDetailView({
             }).filter(Boolean);
             if (parsedGal.length > 0) {
               setLiveGalleryImages(parsedGal);
+            } else {
+              setLiveGalleryImages(article?.galleryImages || []);
             }
+          } else {
+            setLiveGalleryImages(article?.galleryImages || []);
           }
         }
       } catch (err: any) {
@@ -353,6 +407,10 @@ export default function ArticleDetailView({
         // If API returns 404 — article takedown / deleted / rescheduled
         if (err?.status === 404 || err?.isNotFound) {
           setIsArticleNotFound(true);
+        }
+      } finally {
+        if (isMounted && isInitial) {
+          setIsFetchingDetail(false);
         }
       }
     }
@@ -575,8 +633,8 @@ export default function ArticleDetailView({
           {article.title}
         </h1>
 
-        {/* Subtitle / Ringkasan (jika ada) */}
-        {article.subtitle && (
+        {/* Subtitle / Ringkasan (HANYA jika ada ringkasan/sub-judul asli dari API) */}
+        {article.subtitle && stripHtml(article.subtitle).trim().length > 0 && stripHtml(article.subtitle).trim() !== article.title && (
           <p className="font-sans text-sm md:text-base text-slate-600 dark:text-slate-300 leading-relaxed font-normal italic text-center md:text-left">
             {stripHtml(article.subtitle)}
           </p>
@@ -803,17 +861,19 @@ export default function ArticleDetailView({
 
         {/* Relative content wrapper to control the boundary of the sticky bottom-right share button */}
         <div className="relative flex flex-col gap-6 pb-12 md:pb-0">
-          {/* Article Paragraph Content */}
-          <div
-            className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 ${
-              fontSize === 'sm'
-                ? "text-sm"
-                : fontSize === 'base'
-                  ? "text-base"
-                  : "text-lg md:text-xl"
-            }`}
-            dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || article.content || article.summary || article.subtitle || '') }}
-          />
+          {/* Article Paragraph Content - Rendered Instantly & Completely at 0ms */}
+          <div className="flex flex-col gap-4">
+            <div
+              className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 transition-all duration-300 ${
+                fontSize === 'sm'
+                  ? "text-sm"
+                  : fontSize === 'base'
+                    ? "text-base"
+                    : "text-lg md:text-xl"
+              }`}
+              dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || buildInitialContent(article)) }}
+            />
+          </div>
 
           {/* Article Tags */}
           <div className="flex flex-wrap items-center gap-2 pt-4 border-b border-slate-100 dark:border-slate-900/40 pb-4">
