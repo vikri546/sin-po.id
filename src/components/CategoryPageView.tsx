@@ -178,17 +178,12 @@ export default function CategoryPageView({
 
     try {
       if (onLoadMoreRemote && hasMoreRemote !== false) {
-        await Promise.all([
-          onLoadMoreRemote(),
-          new Promise((resolve) => setTimeout(resolve, 500)),
-        ]);
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await onLoadMoreRemote();
       }
+      setVisibleCount(prev => prev + 10);
     } catch (err) {
       console.log('Remote category load notice:', err);
     } finally {
-      setVisibleCount((prev) => prev + 10);
       setIsLoadingMore(false);
     }
   };

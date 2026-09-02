@@ -55,8 +55,15 @@ function getCategoryEndpoint(categoryName: string, page: number, channelId: numb
   return `/berita?channel=${encodeURIComponent(catQuery)}&page=${page}&limit=20&sort=desc`;
 }
 
-// In-memory cache for category articles
-const categoryArticlesCache = new Map<string, Article[]>();
+interface CategoryCacheEntry {
+  pool: Article[];
+  page: number;
+  seenIds: Set<string>;
+  hasMore: boolean;
+}
+
+// In-memory cache for category articles with full pagination state
+const categoryArticlesCache = new Map<string, CategoryCacheEntry>();
 
 function getInitialCategoryArticlesFromMaster(categoryName: string, masterList: Article[]): Article[] {
   if (!categoryName || categoryName === 'SEMUA') return masterList;
@@ -518,11 +525,14 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     async function fetchFilteredNews() {
       try {
         if (selectedCategory && selectedCategory !== 'SEMUA' && selectedCategory !== 'INDEKS' && !submittedSearchQuery && !selectedTag) {
-          // B. CATEGORY FILTER: Check cache & master list for 0ms instant display
+          // B. CATEGORY FILTER: Check full cache first for 0ms instant display & seamless pagination restoration
           const cached = categoryArticlesCache.get(selectedCategory);
-          if (cached && cached.length > 0) {
-            setCategoryArticlesPool(cached);
-            setArticlesState(cached);
+          if (cached && cached.pool && cached.pool.length > 0) {
+            setCategoryArticlesPool(cached.pool);
+            setArticlesState(cached.pool);
+            categoryPageRef.current = cached.page || 2;
+            categorySeenIdsRef.current = new Set(cached.seenIds || []);
+            setHasMoreCategoryNews(cached.hasMore ?? true);
             if (isMounted) finishLoading(150);
           } else {
             const masterPool = masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : masterLiveArticles;
@@ -530,7 +540,11 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
             if (initialArticles.length > 0) {
               setCategoryArticlesPool(initialArticles);
               setArticlesState(initialArticles);
+              categorySeenIdsRef.current = new Set(initialArticles.map(a => a.id));
+              setHasMoreCategoryNews(true); // Always default to true so pagination can load older page 1/2 from API!
               if (isMounted) finishLoading(150);
+            } else {
+              setHasMoreCategoryNews(true);
             }
           }
 
@@ -568,15 +582,27 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
 
           if (categoryArticles.length > 0) {
             categoryArticles[0].isHero = true;
-            categoryArticlesCache.set(selectedCategory, categoryArticles);
-          }
+            const newSeenSet = new Set(categoryArticles.map(a => a.id));
+            const hasMore = categoryArticles.length >= 15;
 
-          if (isMounted && categoryArticles.length > 0) {
-            categorySeenIdsRef.current = new Set(categoryArticles.map(a => a.id));
+            categorySeenIdsRef.current = newSeenSet;
             categoryPageRef.current = 2;
-            setHasMoreCategoryNews(categoryArticles.length >= 20);
-            setCategoryArticlesPool(categoryArticles);
-            setArticlesState(categoryArticles);
+            setHasMoreCategoryNews(hasMore);
+
+            categoryArticlesCache.set(selectedCategory, {
+              pool: categoryArticles,
+              page: 2,
+              seenIds: newSeenSet,
+              hasMore,
+            });
+
+            if (isMounted) {
+              setCategoryArticlesPool(categoryArticles);
+              setArticlesState(categoryArticles);
+            }
+          } else {
+            // Keep master articles if backend API returned empty for page 1, but keep load more active
+            setHasMoreCategoryNews(true);
           }
         } else if (selectedCategory === 'INDEKS' && !submittedSearchQuery && !selectedTag) {
           if (isMounted) {
@@ -638,25 +664,26 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     };
   }, [submittedSearchQuery, selectedCategory, selectedTag, navNonce]);
 
-  // Load next page of category historical articles from backend API (exact sinpo 2 algorithm)
-  const handleLoadMoreCategoryArticles = useCallback(async (attempts: number = 0) => {
+  // Load next page of category historical articles from backend API (fast homepage-style algorithm)
+  const handleLoadMoreCategoryArticles = useCallback(async () => {
     if (!selectedCategory || selectedCategory === 'SEMUA' || !hasMoreCategoryNews) return;
-    if (isFetchingCategoryRef.current && attempts === 0) return;
-    if (attempts >= 2) return; // Prevent slow repetitive network loops
+    if (isFetchingCategoryRef.current) return;
     
     isFetchingCategoryRef.current = true;
     const fetchLimit = 20;
-    const currentPage = categoryPageRef.current;
+    const currentPage = categoryPageRef.current || 1;
 
     try {
-      const channelId = resolveChannelId(selectedCategory, channelsList);
+      const activeChannels = channelsListRef.current.length > 0 ? channelsListRef.current : channelsList;
+      const channelId = resolveChannelId(selectedCategory, activeChannels);
       const endpoint = getCategoryEndpoint(selectedCategory, currentPage, channelId);
       const res = await apiFetch(endpoint);
 
       // Advance page counter for next call
-      categoryPageRef.current = currentPage + 1;
+      const nextPage = currentPage + 1;
+      categoryPageRef.current = nextPage;
 
-      if (res.success && Array.isArray(res.data)) {
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
         const rawItems = res.data.filter((item: any) => item && !isTakedownArticle(item));
 
         if (rawItems.length === 0) {
@@ -674,8 +701,11 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           })
           .filter((a: Article) => a && a.id && !isBrokenLegacyArticle(a));
 
-        // Filter out already-seen articles (like sinpo 2's filterSeenNews)
+        // Filter out already-seen articles
         const newItems = transformed.filter((a: Article) => !categorySeenIdsRef.current.has(a.id));
+
+        const hasMore = rawItems.length >= 10;
+        setHasMoreCategoryNews(hasMore);
 
         if (newItems.length > 0) {
           // Register new IDs as seen
@@ -685,6 +715,15 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           setCategoryArticlesPool(prev => {
             const merged = [...prev, ...newItems];
             merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
+            
+            // Save updated pool state to memory cache
+            categoryArticlesCache.set(selectedCategory, {
+              pool: merged,
+              page: nextPage,
+              seenIds: new Set(categorySeenIdsRef.current),
+              hasMore,
+            });
+
             return merged;
           });
 
@@ -697,24 +736,12 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
             merged.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
             return merged;
           });
-
-          // If raw items < fetchLimit, no more pages
-          if (rawItems.length < fetchLimit) {
-            setHasMoreCategoryNews(false);
-          }
-        } else if (rawItems.length >= fetchLimit && attempts < 1) {
-          // All items were duplicates but server had a full page - try next page (max 1 retry)
-          isFetchingCategoryRef.current = false;
-          return handleLoadMoreCategoryArticles(attempts + 1);
-        } else {
-          setHasMoreCategoryNews(false);
         }
       } else {
         setHasMoreCategoryNews(false);
       }
     } catch (err) {
       console.log('Category pagination notice:', err);
-      setHasMoreCategoryNews(false);
     } finally {
       isFetchingCategoryRef.current = false;
     }
@@ -827,6 +854,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     } else {
       setSelectedArticle(null);
       setStaticModalSlug(null);
+      isFetchingCategoryRef.current = false;
       if (forceScrollToTop) {
         homeScrollPosRef.current = 0;
       }
@@ -845,11 +873,12 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
         }
         window.history.pushState({ type: 'list' }, '', url);
       }
-      setNavNonce((prev) => prev + 1);
+      finishLoading(150);
     }
   };
 
   const handleCategorySelect = (cat: string, skipPushState: boolean = false) => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
     setSelectedCategory(cat);
     setStaticModalSlug(null);
     setShowBookmarksOnly(false);
@@ -868,6 +897,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   };
 
   const handleSearchSubmit = (query: string, skipPushState: boolean = false) => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
     setSubmittedSearchQuery(query);
     setStaticModalSlug(null);
     setSelectedArticle(null);
@@ -883,7 +913,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   };
 
   const handleTagSelect = (tag: string, skipPushState: boolean = false) => {
-    // If user is currently viewing an article, save it as origin so clearing tag returns back to this article
+    window.scrollTo({ top: 0, behavior: 'auto' });
     if (selectedArticle) {
       setTagOriginArticle(selectedArticle);
     }
