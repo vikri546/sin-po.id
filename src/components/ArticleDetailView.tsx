@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, MoreHorizontal } from 'lucide-react';
+import { Volume2, VolumeX, Share, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl, getNumericId } from '@/lib/urlHelpers';
@@ -646,13 +646,13 @@ export default function ArticleDetailView({
             BAGIKAN :
           </span>
           <div className="flex items-center gap-2">
-            {/* Native Web Share API Button (3 Horizontal Dots Icon) */}
+            {/* Native Web Share API Button (iOS/iPhone Share Icon) */}
             <button
               onClick={handleNativeShare}
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
               title="Bagikan Artikel"
             >
-              <MoreHorizontal className="h-4 w-4" />
+              <Share className="h-4 w-4" />
             </button>
 
             {/* Chain Icon for Copy Link with "link copied" Tooltip */}
