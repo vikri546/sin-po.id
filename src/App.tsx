@@ -160,9 +160,10 @@ export interface AppProps {
   initialArticle?: Article | null;
   initialCategory?: string;
   initialStaticSlug?: string | null;
+  initialMasterArticles?: Article[];
 }
 
-export default function App({ initialArticle = null, initialCategory = 'SEMUA', initialStaticSlug = null }: AppProps = {}) {
+export default function App({ initialArticle = null, initialCategory = 'SEMUA', initialStaticSlug = null, initialMasterArticles = [] }: AppProps = {}) {
   // Theme State
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
 
@@ -237,10 +238,10 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
   const [showBookmarksOnly, setShowBookmarksOnly] = useState<boolean>(false);
 
-  // Live State from Laravel REST API
-  const [articlesState, setArticlesState] = useState<Article[]>([]);
-  const [masterLiveArticles, setMasterLiveArticles] = useState<Article[]>([]);
-  const masterHeadlineIdRef = useRef<string | null>(null);
+  // Live State from Laravel REST API — pre-hydrated from SSR / initialMasterArticles for 0ms blink-free render
+  const [masterLiveArticles, setMasterLiveArticles] = useState<Article[]>(() => initialMasterArticles || []);
+  const [articlesState, setArticlesState] = useState<Article[]>(() => initialMasterArticles || []);
+  const masterHeadlineIdRef = useRef<string | null>(initialMasterArticles && initialMasterArticles.length > 0 ? (initialMasterArticles.find(a => a.isHero) || initialMasterArticles[0]).id : null);
   const [breakingNewsList, setBreakingNewsList] = useState<string[]>([]);
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [popularNewsList, setPopularNewsList] = useState<Article[]>([]);
@@ -258,9 +259,9 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   const categorySeenIdsRef = useRef<Set<string>>(new Set());
 
   // Loading & Skeleton State (automatic initial load, reload & navigation transition)
-  const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
+  const [isLoadingContent, setIsLoadingContent] = useState<boolean>(() => !initialMasterArticles || initialMasterArticles.length === 0);
 
-  const masterLiveArticlesRef = useRef<Article[]>([]);
+  const masterLiveArticlesRef = useRef<Article[]>(initialMasterArticles || []);
   const hasInitialFetchedRef = useRef<boolean>(false);
 
   // Safe Post-Hydration Sync (runs ONLY on client after initial SSR hydration pass, preventing hydration mismatch)
@@ -277,15 +278,46 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
 
     try {
       const savedMaster = localStorage.getItem('sinpo_cached_master_articles_v1');
-      if (savedMaster) {
+      const savedHeadlineId = localStorage.getItem('sinpo_cached_headline_id_v1');
+      if (savedMaster && (!initialMasterArticles || initialMasterArticles.length === 0)) {
         const parsed = JSON.parse(savedMaster);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setMasterLiveArticles(parsed);
-          setArticlesState(parsed);
-          masterLiveArticlesRef.current = parsed;
+          let headlineId = savedHeadlineId || masterHeadlineIdRef.current;
+          if (!headlineId && parsed.length > 0) {
+            const h = parsed.find((a: Article) => a.isHero) || parsed[0];
+            headlineId = h.id;
+          }
+          if (headlineId) {
+            masterHeadlineIdRef.current = headlineId;
+          }
+          const cleanParsed = parsed.map((a: Article) => ({
+            ...a,
+            isHero: headlineId ? a.id === headlineId : false
+          }));
+
+          if (headlineId) {
+            const idx = cleanParsed.findIndex((a: Article) => a.id === headlineId);
+            if (idx > 0) {
+              const hArt = cleanParsed[idx];
+              hArt.isHero = true;
+              const rest = cleanParsed.filter((a: Article) => a.id !== headlineId);
+              setMasterLiveArticles([hArt, ...rest]);
+              setArticlesState([hArt, ...rest]);
+              masterLiveArticlesRef.current = [hArt, ...rest];
+            } else {
+              setMasterLiveArticles(cleanParsed);
+              setArticlesState(cleanParsed);
+              masterLiveArticlesRef.current = cleanParsed;
+            }
+          } else {
+            setMasterLiveArticles(parsed);
+            setArticlesState(parsed);
+            masterLiveArticlesRef.current = parsed;
+          }
           setIsLoadingContent(false);
         }
       }
+
       const savedPopular = localStorage.getItem('sinpo_cached_popular_articles_v1');
       if (savedPopular) {
         const parsed = JSON.parse(savedPopular);
@@ -293,6 +325,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           setPopularNewsList(parsed);
         }
       }
+
       const savedBreaking = localStorage.getItem('sinpo_cached_breaking_v1');
       if (savedBreaking) {
         const parsed = JSON.parse(savedBreaking);
