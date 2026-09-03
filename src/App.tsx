@@ -79,7 +79,7 @@ function getInitialCategoryArticlesFromMaster(categoryName: string, masterList: 
     return aCat.includes(searchCat);
   });
   if (filtered.length > 0) {
-    filtered[0].isHero = true;
+    return filtered.map((art, idx) => idx === 0 ? { ...art, isHero: true } : { ...art, isHero: false });
   }
   return filtered;
 }
@@ -240,6 +240,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   // Live State from Laravel REST API
   const [articlesState, setArticlesState] = useState<Article[]>([]);
   const [masterLiveArticles, setMasterLiveArticles] = useState<Article[]>([]);
+  const masterHeadlineIdRef = useRef<string | null>(null);
   const [breakingNewsList, setBreakingNewsList] = useState<string[]>([]);
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [popularNewsList, setPopularNewsList] = useState<Article[]>([]);
@@ -377,9 +378,9 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           }
 
           if (headlineArt) {
-            headlineArt.isHero = true;
+            masterHeadlineIdRef.current = headlineArt.id;
             const remaining = validArticles.filter(a => a.id !== headlineArt.id);
-            validArticles = [headlineArt, ...remaining];
+            validArticles = [{ ...headlineArt, isHero: true }, ...remaining.map(a => ({ ...a, isHero: false }))];
           }
 
           // Merge fresh live articles into existing master live pool
@@ -506,13 +507,33 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     setCategoryArticlesPool([]);
     categorySeenIdsRef.current = new Set();
 
-    // A. HOMEPAGE ("SEMUA") or INDEKS page without search or tag: Smooth restore from masterLiveArticles
+    // A. HOMEPAGE ("SEMUA") or INDEKS page without search or tag: Smooth restore from masterLiveArticles with locked headline
     if ((!selectedCategory || selectedCategory === 'SEMUA' || selectedCategory === 'INDEKS') && !submittedSearchQuery && !selectedTag) {
-      const liveList = masterLiveArticles.length > 0 
+      const rawLiveList = masterLiveArticles.length > 0 
         ? masterLiveArticles 
         : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
-      if (liveList.length > 0) {
-        setArticlesState(liveList);
+      if (rawLiveList.length > 0) {
+        const headlineId = masterHeadlineIdRef.current;
+        let cleanLiveList = rawLiveList.map(a => ({
+          ...a,
+          isHero: headlineId ? a.id === headlineId : false
+        }));
+
+        if (headlineId) {
+          const headlineIndex = cleanLiveList.findIndex(a => a.id === headlineId);
+          if (headlineIndex > 0) {
+            const headlineItem = cleanLiveList[headlineIndex];
+            headlineItem.isHero = true;
+            const rest = cleanLiveList.filter(a => a.id !== headlineId);
+            cleanLiveList = [headlineItem, ...rest];
+          } else if (headlineIndex === 0) {
+            cleanLiveList[0].isHero = true;
+          }
+        } else {
+          cleanLiveList[0].isHero = true;
+        }
+
+        setArticlesState(cleanLiveList);
         if (isMounted) finishLoading(150);
       } else {
         fetchLiveData(false).then(() => {
