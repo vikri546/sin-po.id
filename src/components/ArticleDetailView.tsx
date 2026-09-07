@@ -532,7 +532,7 @@ export default function ArticleDetailView({
       // 2. Fetch OpenVoice Neural Audio from /api/tts if not in memory cache
       if (!audioUrl) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 50000); // 50s timeout for full articles
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s fast timeout
 
         try {
           const res = await fetch('/api/tts', {
@@ -558,8 +558,39 @@ export default function ArticleDetailView({
           }
         } catch (fetchErr: any) {
           clearTimeout(timeoutId);
-          console.warn('TTS Fetch Warning:', fetchErr?.message || fetchErr);
+          console.warn('TTS Fetch Warning, using browser speech fallback:', fetchErr?.message || fetchErr);
           setIsLoadingAudio(false);
+
+          // Fallback to browser SpeechSynthesis so speech NEVER resets or fails!
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
+            try {
+              window.speechSynthesis.cancel();
+              const contentToRead = `${article?.title || ''}. Ditulis oleh ${article?.author || 'Redaksi SinPo'}. ${stripHtml(contentToUse)}`;
+              const utterance = new SpeechSynthesisUtterance(contentToRead.slice(0, 3000));
+              utterance.lang = 'id-ID';
+
+              const voices = window.speechSynthesis.getVoices() || [];
+              const idVoice = voices.find(v => v.lang && (v.lang.includes('id') || v.lang.includes('ID')));
+              if (idVoice) utterance.voice = idVoice;
+
+              utterance.onend = () => {
+                setIsSpeaking(false);
+                setIsAudioActive(false);
+                setSpeechProgress(0);
+              };
+              utterance.onerror = () => {
+                setIsSpeaking(false);
+                setIsAudioActive(false);
+                setSpeechProgress(0);
+              };
+
+              utteranceRef.current = utterance;
+              window.speechSynthesis.speak(utterance);
+              setIsSpeaking(true);
+              return;
+            } catch (e) {}
+          }
+
           setIsSpeaking(false);
           setIsAudioActive(false);
           onShare('Gagal memuat audio penyiar berita.');

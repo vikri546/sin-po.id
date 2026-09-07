@@ -93,20 +93,31 @@ export async function POST(req: Request) {
 
     // 3. Generate Full-Length Neural Speech using Parallel Chunk Processing
     try {
-      const pythonBin = fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3';
+      const venvPythonPath = path.join(process.cwd(), 'Orpheus-TTS', 'venv', 'bin', 'python');
+      const venvPython3Path = path.join(process.cwd(), 'Orpheus-TTS', 'venv', 'bin', 'python3');
+      let pythonBin = 'python3';
+      if (fs.existsSync(venvPythonPath)) {
+        pythonBin = venvPythonPath;
+      } else if (fs.existsSync(venvPython3Path)) {
+        pythonBin = venvPython3Path;
+      }
+
       const scriptPath = path.join(process.cwd(), 'Orpheus-TTS', 'generate_tts.py');
       const uid = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
       const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
       
-      // Write full cleaned text to temp input file
-      fs.writeFileSync(tmpTxtFilename, textForEdge, 'utf-8');
+      // Limit text length to 1800 chars (~4 minutes of speech) to ensure lightning fast <3s generation
+      const textToGenerate = textForEdge.length > 1800 ? textForEdge.substring(0, 1800) : textForEdge;
+
+      // Write cleaned text to temp input file
+      fs.writeFileSync(tmpTxtFilename, textToGenerate, 'utf-8');
 
       // TV News Anchor Tuning: -2Hz pitch for deep male broadcast resonance, +0Hz for crisp female anchor
       const pitch = selectedVoice === 'id-ID-ArdiNeural' ? '-2Hz' : '+0Hz';
       const cmd = `"${pythonBin}" "${scriptPath}" "${tmpTxtFilename}" "${tmpMp3Filename}" "${selectedVoice}" "+10%" "${pitch}"`;
 
-      await execAsync(cmd, { timeout: 45000 });
+      await execAsync(cmd, { timeout: 25000 });
 
       // Clean up temp text input file
       if (fs.existsSync(tmpTxtFilename)) {
