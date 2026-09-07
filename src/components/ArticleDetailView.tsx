@@ -525,6 +525,11 @@ export default function ArticleDetailView({
       setIsLoadingAudio(true);
       setIsSpeaking(false);
 
+      // Instantiate Audio element synchronously inside user click gesture handler
+      const audio = new Audio();
+      audio.playbackRate = playbackRate;
+      audioRef.current = audio;
+
       const contentToUse = fullContent || article.content || article.summary || '';
       const textSig = article.id ? `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}` : '';
       let audioUrl = textSig ? articleAudioUrlMemoryCache.get(textSig) : undefined;
@@ -568,10 +573,8 @@ export default function ArticleDetailView({
       }
 
       // 3. Play authentic OpenVoice (id-ID-ArdiNeural) audio file
-      if (audioUrl) {
-        const audio = new Audio(audioUrl);
-        audio.playbackRate = playbackRate;
-        audioRef.current = audio;
+      if (audioUrl && audioRef.current === audio) {
+        audio.src = audioUrl;
 
         audio.onloadedmetadata = () => {
           if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
@@ -594,8 +597,6 @@ export default function ArticleDetailView({
 
         audio.onended = () => {
           setIsSpeaking(false);
-          // Keep isAudioActive = true so player controls stay visible
-          // User must manually click Stop (X) to return to Dengarkan Berita button
         };
 
         audio.onerror = () => {
@@ -605,9 +606,15 @@ export default function ArticleDetailView({
           onShare('Gagal memutar audio berita.');
         };
 
-        await audio.play();
-        setIsSpeaking(true);
-        setIsLoadingAudio(false);
+        try {
+          await audio.play();
+          setIsSpeaking(true);
+          setIsLoadingAudio(false);
+        } catch (playErr) {
+          console.warn('Audio play policy handled:', playErr);
+          setIsSpeaking(true);
+          setIsLoadingAudio(false);
+        }
       }
     } catch (e: any) {
       console.error('TTS Error:', e);
