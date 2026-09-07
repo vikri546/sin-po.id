@@ -419,19 +419,25 @@ export function transformLaravelPostToArticle(item: any): Article {
   const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.image_url || item.foto || '';
   const imageUrl = getStorageUrl(rawImage);
 
-  // Author resolution
-  let authorName = 'Redaksi SinPo';
+  // Author / Wartawan resolution from api.sinpo.id
+  let authorName = '';
   if (item.datawartawan?.nama_wartawan) {
     authorName = stripHtml(item.datawartawan.nama_wartawan);
   } else if (item.penulis) {
-    authorName = typeof item.penulis === 'object' ? stripHtml(item.penulis.nama || item.penulis.name || '') : stripHtml(item.penulis);
-  } else if (item.author) {
-    authorName = typeof item.author === 'object' ? stripHtml(item.author.name || item.author.nama || '') : stripHtml(item.author);
+    authorName = typeof item.penulis === 'object' ? stripHtml(item.penulis.nama_wartawan || item.penulis.nama || item.penulis.name || '') : stripHtml(item.penulis);
   } else if (item.wartawan) {
-    authorName = typeof item.wartawan === 'object' ? stripHtml(item.wartawan.name || item.wartawan.nama_wartawan || '') : stripHtml(item.wartawan);
+    authorName = typeof item.wartawan === 'object' ? stripHtml(item.wartawan.nama_wartawan || item.wartawan.nama || item.wartawan.name || '') : stripHtml(item.wartawan);
+  } else if (item.author) {
+    authorName = typeof item.author === 'object' ? stripHtml(item.author.nama_wartawan || item.author.name || item.author.nama || '') : stripHtml(item.author);
+  } else if (item.reporter) {
+    authorName = typeof item.reporter === 'object' ? stripHtml(item.reporter.nama_wartawan || item.reporter.name || item.reporter.nama || '') : stripHtml(item.reporter);
+  } else if (item.editor) {
+    authorName = typeof item.editor === 'object' ? stripHtml(item.editor.nama || item.editor.name || '') : stripHtml(item.editor);
+  } else if (item.user) {
+    authorName = typeof item.user === 'object' ? stripHtml(item.user.name || item.user.nama || '') : stripHtml(item.user);
   }
-  authorName = authorName.replace(/\u00a0/g, ' ').trim();
-  if (!authorName) authorName = 'Redaksi SinPo';
+  authorName = authorName.replace(/\u00a0/g, ' ').replace(/^by\s+/i, '').trim();
+  if (!authorName || authorName.length < 2) authorName = 'Redaksi SinPo';
 
   // Summary & Content resolution
   const rawContent = fixContentImages(item.isi || item.content || '');

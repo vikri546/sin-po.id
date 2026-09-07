@@ -1,0 +1,182 @@
+import { NextResponse } from 'next/server';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+import { prepareNewsTextForTTS, normalizeIndonesianAcronyms, formatIndonesianCurrency, formatQuotesAndPauses } from '../../../src/lib/textNormalizer';
+
+const execAsync = promisify(exec);
+
+// Server-side In-Memory & Persistent Disk Audio Cache
+const ttsAudioCache = new Map<string, { buffer: ArrayBuffer; timestamp: number }>();
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL cache
+const DISK_CACHE_DIR = path.join(process.cwd(), '.cache', 'tts');
+
+function ensureDiskCacheDir() {
+  if (!fs.existsSync(DISK_CACHE_DIR)) {
+    fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
+  }
+}
+
+// Path to Orpheus-TTS virtualenv python
+const VENV_PYTHON = path.join(process.cwd(), 'Orpheus-TTS', 'venv', 'bin', 'python');
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { title, author, text, voice } = body || {};
+
+    let processedText = '';
+
+    if (title || author) {
+      // Structured News Order: Title -> Reporter/Wartawan -> Article Content
+      processedText = prepareNewsTextForTTS(title || '', author || '', text || '');
+    } else if (typeof text === 'string' && text.trim().length > 0) {
+      // Raw text provided
+      const cleanContent = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+      processedText = formatQuotesAndPauses(
+        normalizeIndonesianAcronyms(formatIndonesianCurrency(cleanContent))
+      );
+    } else {
+      return NextResponse.json({ error: 'Teks artikel tidak boleh kosong' }, { status: 400 });
+    }
+
+    // Clean up SSML break tags for edge_tts (plain text only)
+    const textForEdge = processedText
+      .replace(/<break[^>]*\/>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Primary Voice: id-ID-ArdiNeural (Male News Anchor) or id-ID-GadisNeural (Female News Anchor)
+    const selectedVoice = voice === 'female' ? 'id-ID-GadisNeural' : 'id-ID-ArdiNeural';
+
+    // MD5 Hash for Persistent Disk & Memory Cache Key (Hashes full article text so edits automatically trigger new audio generation)
+    const cacheKey = `openvoice_${selectedVoice}_${title || ''}_${author || ''}_${textForEdge}`;
+    const hash = crypto.createHash('md5').update(cacheKey).digest('hex');
+    const diskCachePath = path.join(DISK_CACHE_DIR, `${hash}.mp3`);
+    const now = Date.now();
+
+    // 1. Check Server In-Memory Cache (Instant 0ms response)
+    if (ttsAudioCache.has(cacheKey)) {
+      const cached = ttsAudioCache.get(cacheKey)!;
+      if (now - cached.timestamp < CACHE_TTL_MS) {
+        return new NextResponse(cached.buffer.slice(0), {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'X-TTS-Cache': 'MEMORY_HIT',
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+            'Content-Disposition': 'inline; filename="article-speech.mp3"',
+          },
+        });
+      }
+    }
+
+    // 2. Check Persistent Server Disk Cache (Instant <10ms response on web reload / fresh start)
+    ensureDiskCacheDir();
+    if (fs.existsSync(diskCachePath)) {
+      const audioBuffer = fs.readFileSync(diskCachePath);
+      const arrayBuf = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
+      ttsAudioCache.set(cacheKey, { buffer: arrayBuf, timestamp: now });
+
+      return new NextResponse(arrayBuf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'X-TTS-Cache': 'DISK_HIT',
+          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Content-Disposition': 'inline; filename="article-speech.mp3"',
+        },
+      });
+    }
+
+    // 3. Generate Full-Length Neural Speech using Parallel Chunk Processing
+    try {
+      const pythonBin = fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3';
+      const scriptPath = path.join(process.cwd(), 'Orpheus-TTS', 'generate_tts.py');
+      const uid = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
+      const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
+      
+      // Write full cleaned text to temp input file
+      fs.writeFileSync(tmpTxtFilename, textForEdge, 'utf-8');
+
+      // TV News Anchor Tuning: -2Hz pitch for deep male broadcast resonance, +0Hz for crisp female anchor
+      const pitch = selectedVoice === 'id-ID-ArdiNeural' ? '-2Hz' : '+0Hz';
+      const cmd = `"${pythonBin}" "${scriptPath}" "${tmpTxtFilename}" "${tmpMp3Filename}" "${selectedVoice}" "+10%" "${pitch}"`;
+
+      await execAsync(cmd, { timeout: 45000 });
+
+      // Clean up temp text input file
+      if (fs.existsSync(tmpTxtFilename)) {
+        fs.unlinkSync(tmpTxtFilename);
+      }
+
+      if (fs.existsSync(tmpMp3Filename)) {
+        const audioBuffer = fs.readFileSync(tmpMp3Filename);
+        fs.unlinkSync(tmpMp3Filename); // Clean up temp mp3 file
+
+        // Save to persistent disk cache for instant web reload access
+        ensureDiskCacheDir();
+        fs.writeFileSync(diskCachePath, audioBuffer);
+
+        // Store in 24h memory cache
+        const arrayBuf = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
+        ttsAudioCache.set(cacheKey, { buffer: arrayBuf, timestamp: now });
+
+        return new NextResponse(arrayBuf, {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'X-TTS-Cache': 'MISS',
+            'X-TTS-Engine': 'Edge-Neural-OpenVoice',
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+            'Content-Disposition': 'inline; filename="article-speech.mp3"',
+          },
+        });
+      }
+    } catch (openVoiceErr: any) {
+      console.warn('OpenVoice Generation Warning:', openVoiceErr?.message || openVoiceErr);
+    }
+
+    // 3. Fallback to ElevenLabs if local OpenVoice engine binary is unreachable
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb';
+
+    if (apiKey) {
+      const response = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Accept': 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': apiKey,
+          },
+          body: JSON.stringify({
+            text: textForEdge.substring(0, 2500),
+            model_id: 'eleven_flash_v2_5',
+            language_code: 'id',
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const audioBuffer = await response.arrayBuffer();
+        return new NextResponse(audioBuffer, {
+          status: 200,
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          },
+        });
+      }
+    }
+
+    return NextResponse.json({ error: 'Gagal memproses audio Text-to-Speech' }, { status: 500 });
+  } catch (error: any) {
+    console.error('TTS Internal Error:', error);
+    return NextResponse.json({ error: error?.message || 'Terjadi kesalahan pada server TTS' }, { status: 500 });
+  }
+}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link } from 'lucide-react';
+import { Volume2, VolumeX, Share, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, Loader2, X, Play, Pause } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl, getNumericId } from '@/lib/urlHelpers';
@@ -27,6 +27,9 @@ import NotFoundView from './NotFoundView';
 
 // In-memory cache for fetched article detail body HTML
 const articleContentMemoryCache = new Map<string, string>();
+// In-memory cache for generated audio Blob URLs per article ID
+const articleAudioUrlMemoryCache = new Map<string, string>();
+
 
 const buildInitialContent = (art: Article | null): string => {
   if (!art) return '';
@@ -50,6 +53,8 @@ const calculateSpeechDuration = (title?: string, author?: string, content?: stri
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   return Math.max(30, Math.round((words / 160) * 60));
 };
+
+
 
 export default function ArticleDetailView({
   article,
@@ -141,11 +146,15 @@ export default function ArticleDetailView({
 
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isAudioActive, setIsAudioActive] = useState(false);
   const [speechProgress, setSpeechProgress] = useState(0); // in seconds
   const [speechDuration, setSpeechDuration] = useState(() => 
     calculateSpeechDuration(article?.title, article?.author, article?.content)
   );
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
   const [isDragging, setIsDragging] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
   const [fullContent, setFullContent] = useState<string>(() => {
@@ -172,6 +181,41 @@ export default function ArticleDetailView({
     setSpeechProgress(0);
     setLiveViews(null);
   }, [article, fullContent]);
+
+  // Silent background pre-generation of TTS audio on article view for instant 0-1s playback
+  useEffect(() => {
+    if (!article?.id) return;
+    const contentToUse = fullContent || article.content || article.summary || '';
+    const textSig = `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
+    if (articleAudioUrlMemoryCache.has(textSig)) return;
+
+    const timer = setTimeout(() => {
+      if (!contentToUse) return;
+
+      fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: article.title || '',
+          author: article.author || 'Redaksi SinPo',
+          text: contentToUse,
+        }),
+      })
+        .then((res) => {
+          if (res.ok) return res.blob();
+          return null;
+        })
+        .then((blob) => {
+          if (blob) {
+            const audioUrl = URL.createObjectURL(blob);
+            articleAudioUrlMemoryCache.set(textSig, audioUrl);
+          }
+        })
+        .catch(() => {});
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [article?.id, fullContent]);
 
   useEffect(() => {
     if (!article) return;
@@ -441,144 +485,169 @@ export default function ArticleDetailView({
     };
   }, [article.id, (article as any).slug]);
 
-  // Handle ticking progress when TTS is active
+  // Clean up audio when article changes or component unmounts
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
-    if (isSpeaking && !isDragging) {
-      interval = setInterval(() => {
-        setSpeechProgress((prev) => {
-          if (prev >= speechDuration) {
-            // Cap it at speechDuration so it doesn't overflow, but do NOT stop speaking.
-            // Let the utterance's onend handler handle the actual completion.
-            return speechDuration;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-    } else {
-      if (interval) clearInterval(interval);
-    }
     return () => {
-      if (interval) clearInterval(interval);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
     };
-  }, [isSpeaking, isDragging, speechDuration]);
+  }, [article?.id]);
 
-  // Handle Indonesian audio Text-to-Speech synthesis and seeking
-  const toggleSpeech = () => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window) || !window.speechSynthesis) {
-      onShare("Fitur audio tidak didukung di peramban ini.");
-      return;
-    }
-    try {
+  // Handle OpenVoice / Edge-Neural Text-to-Speech audio synthesis & instant playback
+  const toggleSpeech = async () => {
+    if (!article || isLoadingAudio) return;
+
+    // 1. Toggle pause/play if audio element already exists
+    if (audioRef.current && audioRef.current.src) {
       if (isSpeaking) {
-        if (utteranceRef.current) {
-          utteranceRef.current.onend = null;
-          utteranceRef.current.onerror = null;
-          utteranceRef.current.onboundary = null;
-        }
-        window.speechSynthesis.cancel();
+        audioRef.current.pause();
         setIsSpeaking(false);
-        setSpeechProgress(0);
       } else {
-        window.speechSynthesis.cancel(); // Stop any other running synthesis
-        setSpeechProgress(0);
-
-        // Clean the text to avoid reading HTML codes
-        const contentToRead = `${article?.title || ''}. Ditulis oleh ${article?.author || 'Redaksi SinPo'}. ${stripHtml(article?.content || '')}`;
-        
-        const utterance = new SpeechSynthesisUtterance(contentToRead);
-        utterance.lang = 'id-ID';
-
-        // Attempt to bind an Indonesian voice specifically
-        const voices = window.speechSynthesis.getVoices() || [];
-        const idVoice = voices.find(v => v.lang && (v.lang.includes('id') || v.lang.includes('ID')));
-        if (idVoice) {
-          utterance.voice = idVoice;
+        if (audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration) {
+          audioRef.current.currentTime = 0;
         }
-
-        utterance.onend = () => {
-          setIsSpeaking(false);
-          setSpeechProgress(0);
-        };
-        utterance.onerror = () => {
-          setIsSpeaking(false);
-          setSpeechProgress(0);
-        };
-
-        utteranceRef.current = utterance;
-        window.speechSynthesis.speak(utterance);
+        audioRef.current.play().catch(() => {});
         setIsSpeaking(true);
       }
-    } catch (e) {
+      return;
+    }
+
+    try {
+      // Ensure any previous audio is completely stopped
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      setIsAudioActive(true);
+      setIsLoadingAudio(true);
       setIsSpeaking(false);
+
+      const contentToUse = fullContent || article.content || article.summary || '';
+      const textSig = article.id ? `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}` : '';
+      let audioUrl = textSig ? articleAudioUrlMemoryCache.get(textSig) : undefined;
+
+      // 2. Fetch OpenVoice Neural Audio from /api/tts if not in memory cache
+      if (!audioUrl) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 50000); // 50s timeout for full articles
+
+        try {
+          const res = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: article.title || '',
+              author: article.author || 'Redaksi SinPo',
+              text: contentToUse
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const blob = await res.blob();
+            audioUrl = URL.createObjectURL(blob);
+            if (textSig) {
+              articleAudioUrlMemoryCache.set(textSig, audioUrl);
+            }
+          } else {
+            throw new Error('Gagal memuat audio penyiar berita');
+          }
+        } catch (fetchErr: any) {
+          clearTimeout(timeoutId);
+          console.warn('TTS Fetch Warning:', fetchErr?.message || fetchErr);
+          setIsLoadingAudio(false);
+          setIsSpeaking(false);
+          setIsAudioActive(false);
+          onShare('Gagal memuat audio penyiar berita.');
+          return;
+        }
+      }
+
+      // 3. Play authentic OpenVoice (id-ID-ArdiNeural) audio file
+      if (audioUrl) {
+        const audio = new Audio(audioUrl);
+        audio.playbackRate = playbackRate;
+        audioRef.current = audio;
+
+        audio.onloadedmetadata = () => {
+          if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+            setSpeechDuration(audio.duration);
+          }
+        };
+
+        // Use durationchange as backup in case loadedmetadata fires before duration is ready
+        audio.ondurationchange = () => {
+          if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+            setSpeechDuration(audio.duration);
+          }
+        };
+
+        audio.ontimeupdate = () => {
+          if (!isDragging) {
+            setSpeechProgress(audio.currentTime);
+          }
+        };
+
+        audio.onended = () => {
+          setIsSpeaking(false);
+          // Keep isAudioActive = true so player controls stay visible
+          // User must manually click Stop (X) to return to Dengarkan Berita button
+        };
+
+        audio.onerror = () => {
+          setIsSpeaking(false);
+          setIsLoadingAudio(false);
+          setIsAudioActive(false);
+          onShare('Gagal memutar audio berita.');
+        };
+
+        await audio.play();
+        setIsSpeaking(true);
+        setIsLoadingAudio(false);
+      }
+    } catch (e: any) {
+      console.error('TTS Error:', e);
+      setIsSpeaking(false);
+      setIsLoadingAudio(false);
+      onShare('Gagal memuat audio berita.');
+    }
+  };
+
+  const stopSpeech = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setIsSpeaking(false);
+    setIsLoadingAudio(false);
+    setIsAudioActive(false);
+    setSpeechProgress(0);
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackRate(speed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = speed;
     }
   };
 
   const handleSeek = (newSeconds: number) => {
     setSpeechProgress(newSeconds);
-    
-    // If speaking, restart from that percentage of the text content
-    if (isSpeaking && typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
-      try {
-        if (utteranceRef.current) {
-          utteranceRef.current.onend = null;
-          utteranceRef.current.onerror = null;
-          utteranceRef.current.onboundary = null;
-        }
-        window.speechSynthesis.cancel();
-        
-        const contentToRead = `${article?.title || ''}. Ditulis oleh ${article?.author || 'Redaksi SinPo'}. ${stripHtml(article?.content || '')}`;
-        const percentage = speechDuration > 0 ? newSeconds / speechDuration : 0;
-        const startCharIndex = Math.floor(percentage * contentToRead.length);
-        const remainingText = contentToRead.substring(startCharIndex);
-        
-        if (remainingText.trim().length > 0) {
-          const utterance = new SpeechSynthesisUtterance(remainingText);
-          utterance.lang = 'id-ID';
-          
-          const voices = window.speechSynthesis.getVoices() || [];
-          const idVoice = voices.find(v => v.lang && (v.lang.includes('id') || v.lang.includes('ID')));
-          if (idVoice) {
-            utterance.voice = idVoice;
-          }
-          
-          utterance.onend = () => {
-            setIsSpeaking(false);
-            setSpeechProgress(0);
-          };
-          utterance.onerror = () => {
-            setIsSpeaking(false);
-            setSpeechProgress(0);
-          };
-          
-          utteranceRef.current = utterance;
-          window.speechSynthesis.speak(utterance);
-        } else {
-          setIsSpeaking(false);
-          setSpeechProgress(0);
-        }
-      } catch (e) {
-        setIsSpeaking(false);
-      }
+    if (audioRef.current) {
+      audioRef.current.currentTime = newSeconds;
     }
   };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
-  // Clean up speech synthesis when component unmounts
-  useEffect(() => {
-    return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window && window.speechSynthesis) {
-        try {
-          window.speechSynthesis.cancel();
-        } catch (e) {}
-      }
-    };
-  }, []);
 
   const isBookmarked = (bookmarkedIds || []).includes(article?.id || '');
 
@@ -768,19 +837,65 @@ export default function ArticleDetailView({
         <div className="flex flex-col gap-3.5 py-3.5 border-y border-slate-200/60 dark:border-slate-800/60">
           <div className="flex items-center justify-between gap-1.5 sm:gap-4 w-full">
             <div className="flex items-center gap-1.5 sm:gap-3">
-              {/* TTS Audio Reader */}
-              <button
-                onClick={toggleSpeech}
-                className={`flex items-center gap-1 min-[375px]:gap-1.5 px-2 py-1 min-[375px]:px-3 min-[375px]:py-1.5 rounded-full font-sans text-[9.5px] min-[375px]:text-xs uppercase tracking-wider font-bold transition-all cursor-pointer ${
-                  isSpeaking
-                    ? "bg-brand-red-600 text-white"
-                    : "bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800/50"
-                }`}
-                title={isSpeaking ? "Hentikan Suara" : "Dengarkan Berita (TTS)"}
-              >
-                {isSpeaking ? <VolumeX className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" /> : <Volume2 className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />}
-                <span>{isSpeaking ? "TUTUP" : "DENGARKAN BERITA"}</span>
-              </button>
+              {/* TTS Audio Reader & Executed Controls */}
+              {!isAudioActive ? (
+                <button
+                  onClick={toggleSpeech}
+                  className="flex items-center gap-1 min-[375px]:gap-1.5 px-2 py-1 min-[375px]:px-3 min-[375px]:py-1.5 rounded-full font-sans text-[9.5px] min-[375px]:text-xs uppercase tracking-wider font-bold transition-all cursor-pointer bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800/50"
+                  title="Dengarkan Berita (TTS)"
+                >
+                  <Volume2 className="h-3.5 w-3.5 min-[375px]:h-4 min-[375px]:w-4" />
+                  <span>DENGARKAN BERITA</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 font-sans">
+                  {/* Stop Button (Icon silang, bg transparant, border circle) */}
+                  <button
+                    onClick={stopSpeech}
+                    className="p-1.5 rounded-full bg-transparent border border-slate-300 dark:border-slate-700 hover:border-brand-red-600 hover:text-brand-red-600 dark:hover:border-brand-red-500 dark:hover:text-brand-red-400 text-slate-600 dark:text-slate-400 transition-all cursor-pointer"
+                    title="Hentikan Suara (Stop)"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+
+                  {/* Pause/Continue Button (Icon pause/continue, bg transparant, border circle) */}
+                  <button
+                    onClick={toggleSpeech}
+                    disabled={isLoadingAudio}
+                    className="p-1.5 rounded-full bg-transparent border border-slate-300 dark:border-slate-700 hover:border-brand-red-600 hover:text-brand-red-600 dark:hover:border-brand-red-500 dark:hover:text-brand-red-400 text-slate-600 dark:text-slate-400 transition-all cursor-pointer disabled:opacity-50"
+                    title={isLoadingAudio ? "Memproses audio..." : isSpeaking ? "Jeda (Pause)" : "Lanjutkan (Continue)"}
+                  >
+                    {isLoadingAudio ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-brand-red-600" />
+                    ) : isSpeaking ? (
+                      <Pause className="h-4 w-4" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                  </button>
+
+                  {/* Separator */}
+                  <span className="text-slate-300 dark:text-slate-700 select-none font-light">|</span>
+
+                  {/* Speed Controls: 1x >>, 2x >>, 3x >> */}
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3].map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => handleSpeedChange(speed)}
+                        className={`px-2 py-0.5 rounded border text-[11px] font-sans font-semibold bg-transparent transition-all cursor-pointer ${
+                          playbackRate === speed
+                            ? 'border-brand-red-600 text-brand-red-600 dark:border-brand-red-500 dark:text-brand-red-400 font-bold shadow-xs'
+                            : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-600'
+                        }`}
+                        title={`Kecepatan ${speed}x`}
+                      >
+                        {speed}x &raquo;
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Font Sizer */}
@@ -807,17 +922,19 @@ export default function ArticleDetailView({
             </div>
           </div>
 
-          {/* Progress Slider (Visible when speaking/listening) */}
-          {isSpeaking && (
+          {/* Progress Slider (Visible when audio is active) */}
+          {isAudioActive && (
             <div className="flex items-center gap-4 w-full pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-8 text-right select-none">
+              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-right select-none">
                 {formatTime(speechProgress)}
               </span>
               <input
                 type="range"
                 min={0}
-                max={speechDuration}
+                max={speechDuration || 1}
+                step={0.1}
                 value={speechProgress}
+                disabled={isLoadingAudio}
                 onMouseDown={() => setIsDragging(true)}
                 onTouchStart={() => setIsDragging(true)}
                 onChange={(e) => setSpeechProgress(Number(e.target.value))}
@@ -840,9 +957,9 @@ export default function ArticleDetailView({
                     handleSeek(speechProgress);
                   }
                 }}
-                className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-red-600 dark:accent-brand-red-500 focus:outline-none"
+                className={`flex-1 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-red-600 dark:accent-brand-red-500 focus:outline-none ${isLoadingAudio ? 'opacity-50' : ''}`}
               />
-              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-8 text-left select-none">
+              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-left select-none">
                 {formatTime(speechDuration)}
               </span>
             </div>
