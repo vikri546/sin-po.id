@@ -98,13 +98,14 @@ export function formatQuotesAndPauses(text: string): string {
   if (!text) return '';
 
   return text
-    // Replace direct quotes "..." or “...” or ‘...’ with subtle pause markers for dialogue intonation
-    .replace(/["“]([^"”]+)["”]/g, (_, quoteContent) => {      const trimmed = quoteContent.trim();
-      return `, <break time="0.3s" /> "${trimmed}" <break time="0.3s" />, `;
+    // Replace direct quotes with clean commas for smooth speech intonation
+    .replace(/["“]([^"”]+)["”]/g, (_, quoteContent) => {
+      const trimmed = quoteContent.trim();
+      return `, ${trimmed}, `;
     })
-    // Normalize multiple dashes or ellipses to clean SSML pauses
-    .replace(/\s*--+\s*/g, ' <break time="0.4s" /> ')
-    .replace(/\s*\.\.\.+\s*/g, '... <break time="0.5s" /> ');
+    // Normalize multiple dashes or ellipses to clean pauses
+    .replace(/\s*--+\s*/g, ', ')
+    .replace(/\s*\.\.\.+\s*/g, '... ');
 }
 
 /**
