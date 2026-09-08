@@ -49,8 +49,8 @@ export async function POST(req: Request) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    // Primary Voice: id-ID-ArdiNeural (Male News Anchor) or id-ID-GadisNeural (Female News Anchor)
-    const selectedVoice = voice === 'female' ? 'id-ID-GadisNeural' : 'id-ID-ArdiNeural';
+    // Primary Voice: id-ID-GadisNeural (Female News Anchor) or id-ID-ArdiNeural (Male News Anchor)
+    const selectedVoice = voice === 'male' ? 'id-ID-ArdiNeural' : 'id-ID-GadisNeural';
 
     // MD5 Hash for Persistent Disk & Memory Cache Key (Hashes full article text so edits automatically trigger new audio generation)
     const cacheKey = `openvoice_${selectedVoice}_${title || ''}_${author || ''}_${textForEdge}`;
