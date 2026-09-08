@@ -123,7 +123,7 @@ export async function POST(req: Request) {
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
       
       // Send full article text (up to 10000 chars) — generate_tts.py processes 500-char chunks in parallel via asyncio.gather
-      const textToGenerate = textForEdge.length > 10000 ? textForEdge.substring(0, 10000) : textForEdge;
+      const textToGenerate = textForEdge.length > 100000 ? textForEdge.substring(0, 100000) : textForEdge;
 
       // Write cleaned text to temp input file
       fs.writeFileSync(tmpTxtFilename, textToGenerate, 'utf-8');
