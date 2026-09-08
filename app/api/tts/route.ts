@@ -106,7 +106,18 @@ export async function POST(req: Request) {
         pythonBin = venvPython3Path;
       }
 
-      const scriptPath = path.join(process.cwd(), 'Orpheus-TTS', 'generate_tts.py');
+      const scriptsGenPath = path.join(process.cwd(), 'scripts', 'generate_tts.py');
+      const orpheusGenPath = path.join(process.cwd(), 'Orpheus-TTS', 'generate_tts.py');
+      const rootGenPath = path.join(process.cwd(), 'generate_tts.py');
+
+      let scriptPath = scriptsGenPath;
+      if (fs.existsSync(scriptsGenPath)) {
+        scriptPath = scriptsGenPath;
+      } else if (fs.existsSync(orpheusGenPath)) {
+        scriptPath = orpheusGenPath;
+      } else if (fs.existsSync(rootGenPath)) {
+        scriptPath = rootGenPath;
+      }
       const uid = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
       const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
