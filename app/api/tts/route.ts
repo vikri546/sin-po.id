@@ -122,8 +122,8 @@ export async function POST(req: Request) {
       const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
       
-      // Limit text length to 1000 chars (~2 minutes of broadcast anchor speech) to ensure lightning fast <3s generation
-      const textToGenerate = textForEdge.length > 1000 ? textForEdge.substring(0, 1000) : textForEdge;
+      // Send full article text (up to 10000 chars) — generate_tts.py processes 500-char chunks in parallel via asyncio.gather
+      const textToGenerate = textForEdge.length > 10000 ? textForEdge.substring(0, 10000) : textForEdge;
 
       // Write cleaned text to temp input file
       fs.writeFileSync(tmpTxtFilename, textToGenerate, 'utf-8');
