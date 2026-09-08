@@ -8,3 +8,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated TTS audio files (stored on VPS, not in repo)
+public/audio/tts/
+.cache/

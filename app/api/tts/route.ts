@@ -8,14 +8,15 @@ import { prepareNewsTextForTTS, normalizeIndonesianAcronyms, formatIndonesianCur
 
 const execAsync = promisify(exec);
 
-// Server-side In-Memory & Persistent Disk Audio Cache
+// Server-side In-Memory & Public Disk Audio Storage
+// Audio files saved to public/audio/tts/ → publicly accessible at /audio/tts/HASH.mp3
 const ttsAudioCache = new Map<string, { buffer: ArrayBuffer; timestamp: number }>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL cache
-const DISK_CACHE_DIR = path.join(process.cwd(), '.cache', 'tts');
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours TTL memory cache
+const PUBLIC_AUDIO_DIR = path.join(process.cwd(), 'public', 'audio', 'tts');
 
-function ensureDiskCacheDir() {
-  if (!fs.existsSync(DISK_CACHE_DIR)) {
-    fs.mkdirSync(DISK_CACHE_DIR, { recursive: true });
+function ensurePublicAudioDir() {
+  if (!fs.existsSync(PUBLIC_AUDIO_DIR)) {
+    fs.mkdirSync(PUBLIC_AUDIO_DIR, { recursive: true });
   }
 }
 
@@ -54,7 +55,8 @@ export async function POST(req: Request) {
     // MD5 Hash for Persistent Disk & Memory Cache Key (Hashes full article text so edits automatically trigger new audio generation)
     const cacheKey = `openvoice_${selectedVoice}_${title || ''}_${author || ''}_${textForEdge}`;
     const hash = crypto.createHash('md5').update(cacheKey).digest('hex');
-    const diskCachePath = path.join(DISK_CACHE_DIR, `${hash}.mp3`);
+    const publicFilePath = path.join(PUBLIC_AUDIO_DIR, `${hash}.mp3`);
+    const publicUrl = `/audio/tts/${hash}.mp3`; // Publicly accessible URL
     const now = Date.now();
 
     // 1. Check Server In-Memory Cache (Instant 0ms response)
@@ -66,6 +68,7 @@ export async function POST(req: Request) {
           headers: {
             'Content-Type': 'audio/mpeg',
             'X-TTS-Cache': 'MEMORY_HIT',
+            'X-TTS-Url': publicUrl,
             'Cache-Control': 'public, max-age=86400, s-maxage=86400',
             'Content-Disposition': 'inline; filename="article-speech.mp3"',
           },
@@ -73,10 +76,10 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Check Persistent Server Disk Cache (Instant <10ms response on web reload / fresh start)
-    ensureDiskCacheDir();
-    if (fs.existsSync(diskCachePath)) {
-      const audioBuffer = fs.readFileSync(diskCachePath);
+    // 2. Check Public Audio Storage (Instant <10ms — file served at /audio/tts/HASH.mp3)
+    ensurePublicAudioDir();
+    if (fs.existsSync(publicFilePath)) {
+      const audioBuffer = fs.readFileSync(publicFilePath);
       const arrayBuf = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
       ttsAudioCache.set(cacheKey, { buffer: arrayBuf, timestamp: now });
 
@@ -85,6 +88,7 @@ export async function POST(req: Request) {
         headers: {
           'Content-Type': 'audio/mpeg',
           'X-TTS-Cache': 'DISK_HIT',
+          'X-TTS-Url': publicUrl,
           'Cache-Control': 'public, max-age=86400, s-maxage=86400',
           'Content-Disposition': 'inline; filename="article-speech.mp3"',
         },
@@ -107,8 +111,8 @@ export async function POST(req: Request) {
       const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
       
-      // Limit text length to 1800 chars (~4 minutes of speech) to ensure lightning fast <3s generation
-      const textToGenerate = textForEdge.length > 1800 ? textForEdge.substring(0, 1800) : textForEdge;
+      // Limit text length to 1000 chars (~2 minutes of broadcast anchor speech) to ensure lightning fast <3s generation
+      const textToGenerate = textForEdge.length > 1000 ? textForEdge.substring(0, 1000) : textForEdge;
 
       // Write cleaned text to temp input file
       fs.writeFileSync(tmpTxtFilename, textToGenerate, 'utf-8');
@@ -117,7 +121,7 @@ export async function POST(req: Request) {
       const pitch = selectedVoice === 'id-ID-ArdiNeural' ? '-2Hz' : '+0Hz';
       const cmd = `"${pythonBin}" "${scriptPath}" "${tmpTxtFilename}" "${tmpMp3Filename}" "${selectedVoice}" "+10%" "${pitch}"`;
 
-      await execAsync(cmd, { timeout: 25000 });
+      await execAsync(cmd, { timeout: 45000 });
 
       // Clean up temp text input file
       if (fs.existsSync(tmpTxtFilename)) {
@@ -128,9 +132,9 @@ export async function POST(req: Request) {
         const audioBuffer = fs.readFileSync(tmpMp3Filename);
         fs.unlinkSync(tmpMp3Filename); // Clean up temp mp3 file
 
-        // Save to persistent disk cache for instant web reload access
-        ensureDiskCacheDir();
-        fs.writeFileSync(diskCachePath, audioBuffer);
+        // Save to public audio storage → accessible at /audio/tts/HASH.mp3
+        ensurePublicAudioDir();
+        fs.writeFileSync(publicFilePath, audioBuffer);
 
         // Store in 24h memory cache
         const arrayBuf = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
@@ -142,6 +146,7 @@ export async function POST(req: Request) {
             'Content-Type': 'audio/mpeg',
             'X-TTS-Cache': 'MISS',
             'X-TTS-Engine': 'Edge-Neural-OpenVoice',
+            'X-TTS-Url': publicUrl,
             'Cache-Control': 'public, max-age=86400, s-maxage=86400',
             'Content-Disposition': 'inline; filename="article-speech.mp3"',
           },

@@ -537,7 +537,7 @@ export default function ArticleDetailView({
       // 2. Fetch OpenVoice Neural Audio from /api/tts if not in memory cache
       if (!audioUrl) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s fast timeout
+        const timeoutId = setTimeout(() => controller.abort(), 50000); // 50s timeout for full articles
 
         try {
           const res = await fetch('/api/tts', {
