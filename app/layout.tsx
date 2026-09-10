@@ -165,6 +165,8 @@ export default function RootLayout({
         <link rel="shortcut icon" href="/sinpo-favicon.png" type="image/png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="apple-touch-icon" href="/sinpo-favicon.png" />
+        <link rel="alternate" type="application/rss+xml" title="SinPo.id - RSS Feed" href="https://sinpo.id/feed" />
+        <link rel="alternate" type="application/rss+xml" title="SinPo.id - RSS Feed (XML)" href="https://sinpo.id/feed.xml" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdWebsite) }}
