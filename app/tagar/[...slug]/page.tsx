@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import App from '../../../src/App';
 
 export async function generateMetadata(props: {
@@ -51,6 +52,16 @@ export async function generateMetadata(props: {
   };
 }
 
-export default function TagarCatchAllPage() {
+export default async function TagarCatchAllPage(props: {
+  params: Promise<{ slug?: string[] }>;
+}) {
+  const params = await props.params;
+  const slugArray = params?.slug || [];
+
+  if (slugArray.includes('feed')) {
+    const tagSlug = slugArray.filter((s) => s !== 'feed')[0] || 'berita';
+    redirect(`/rss?tag=${encodeURIComponent(tagSlug)}`);
+  }
+
   return <App />;
 }

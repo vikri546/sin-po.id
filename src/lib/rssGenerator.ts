@@ -17,6 +17,7 @@ export interface RssFeedOptions {
   category?: string;
   channelId?: string | number;
   articleId?: string | number;
+  tag?: string;
   limit?: number;
 }
 
@@ -30,14 +31,19 @@ function cleanCdata(text: any): string {
 
 function resolveChannelId(categoryName: string): string | number {
   const cat = String(categoryName || '').toUpperCase().trim();
-  if (cat === 'GAYA HIDUP' || cat === 'GAYAHIDUP' || cat === 'GAYA-HIDUP' || cat === 'LIFESTYLE') return 17;
+  if (cat === 'POLITIK') return 2;
+  if (cat === 'HUKUM') return 3;
+  if (cat === 'OPINI') return 4;
+  if (cat === 'EKBIS' || cat === 'EKONOMI' || cat === 'EKONOMI & BISNIS' || cat === 'EKONOMI-BISNIS') return 5;
+  if (cat === 'PERISTIWA' || cat === 'NASIONAL') return 6;
   if (cat === 'GALERI') return 15;
+  if (cat === 'GAYA HIDUP' || cat === 'GAYAHIDUP' || cat === 'GAYA-HIDUP' || cat === 'LIFESTYLE') return 17;
+  if (cat === 'DUNIA' || cat === 'INTERNASIONAL') return 18;
   if (cat === 'BONGKAR') return 21;
   if (cat === 'BUDAYA') return 22;
-  if (cat === 'DUNIA') return 18;
   if (cat === 'PENDIDIKAN') return 23;
   if (cat === 'SIN PO DULU' || cat === 'SINPO DULU' || cat === 'SIN-PO-DULU') return 24;
-  if (cat === 'OLAHRAGA') return 25;
+  if (cat === 'OLAHRAGA' || cat === 'SPORT') return 25;
   if (cat === 'KESEHATAN') return 26;
   if (cat === 'SIN PO TV' || cat === 'SINPO TV' || cat === 'POJOK SINPO') return 27;
   return categoryName.toLowerCase().trim();
@@ -157,6 +163,7 @@ export async function fetchRawArticles(options: {
   limit?: number;
   channel?: string | number;
   articleId?: string | number;
+  tag?: string;
 }): Promise<any[]> {
   const limit = options.limit || 50;
 
@@ -180,7 +187,9 @@ export async function fetchRawArticles(options: {
     }
 
     let url = `${API_BASE_URL}/berita?limit=${limit}&sort=desc`;
-    if (options.channel) {
+    if (options.tag) {
+      url = `${API_BASE_URL}/berita?tag=${encodeURIComponent(String(options.tag))}&limit=${limit}&sort=desc`;
+    } else if (options.channel) {
       const channelParam = resolveChannelId(String(options.channel));
       url = `${API_BASE_URL}/berita?channel=${encodeURIComponent(String(channelParam))}&limit=${limit}&sort=desc`;
     }
@@ -201,7 +210,16 @@ export async function fetchRawArticles(options: {
       } else if (Array.isArray(json)) {
         articles = json;
       }
-      return articles.filter((item) => !isTakedownArticle(item));
+      
+      let filtered = articles.filter((item) => !isTakedownArticle(item));
+      if (options.tag) {
+        const cleanTag = String(options.tag).toLowerCase().replace(/-/g, ' ').trim();
+        filtered = filtered.filter((item) => {
+          const itemTag = String(item.tag || item.tags || '').toLowerCase();
+          return itemTag.includes(cleanTag);
+        });
+      }
+      return filtered;
     }
   } catch (err) {
     console.warn('RSS Feed fetch error:', err);
@@ -296,6 +314,7 @@ export async function generateRssXml(options: RssFeedOptions = {}): Promise<stri
       limit: options.limit || 50,
       channel: options.channelId || options.category,
       articleId: options.articleId,
+      tag: options.tag,
     });
 
     const nowRfc = new Date().toUTCString();

@@ -8,14 +8,20 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const channel = searchParams.get('channel') || searchParams.get('category') || undefined;
     const articleId = searchParams.get('articleId') || undefined;
+    const tag = searchParams.get('tag') || searchParams.get('tagar') || undefined;
 
-    const channelName = channel ? channel.replace(/-/g, ' ').toUpperCase() : undefined;
-    const title = channelName
-      ? `Berita ${channelName} Terkini - SinPo.id`
-      : 'SinPo.id - Matahari Indonesia';
-    const description = channelName
-      ? `Portal berita politik, hukum, ekonomi, peristiwa, dan terkini kanal ${channelName} dari SinPo.id Matahari Indonesia.`
-      : 'Portal berita politik, hukum, ekonomi, peristiwa, dan terkini Indonesia dari SinPo.id Matahari Indonesia.';
+    let title = 'SinPo.id - Matahari Indonesia';
+    let description = 'Portal berita politik, hukum, ekonomi, peristiwa, dan terkini Indonesia dari SinPo.id Matahari Indonesia.';
+
+    if (tag) {
+      const cleanTag = tag.replace(/-/g, ' ');
+      title = `Berita #${cleanTag} Terkini - SinPo.id`;
+      description = `Kumpulan berita terkini dan topik hangat seputar #${cleanTag} di SinPo.id Matahari Indonesia.`;
+    } else if (channel) {
+      const channelName = channel.replace(/-/g, ' ').toUpperCase();
+      title = `Berita ${channelName} Terkini - SinPo.id`;
+      description = `Portal berita politik, hukum, ekonomi, peristiwa, dan terkini kanal ${channelName} dari SinPo.id Matahari Indonesia.`;
+    }
 
     const feedUrl = request.url.includes('?')
       ? `https://sinpo.id/rss?${request.url.split('?')[1]}`
@@ -27,6 +33,7 @@ export async function GET(request: Request) {
       feedUrl,
       category: channel,
       articleId,
+      tag,
       limit: articleId ? 1 : 50,
     });
 
