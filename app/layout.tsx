@@ -25,6 +25,9 @@ export const metadata: Metadata = {
   category: 'News & Media',
   alternates: {
     canonical: 'https://sinpo.id',
+    types: {
+      'application/rss+xml': 'https://sinpo.id/rss',
+    },
   },
   openGraph: {
     title: 'SinPo.id - Matahari Indonesia',

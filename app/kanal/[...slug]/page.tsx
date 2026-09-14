@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import App from '../../../src/App';
 
 export async function generateMetadata(props: {
@@ -56,6 +57,12 @@ export default async function KanalCatchAllPage(props: {
 }) {
   const params = await props.params;
   const slugArray = params?.slug || [];
+
+  if (slugArray.includes('feed')) {
+    const categorySlug = slugArray.filter((s) => s !== 'feed')[0] || 'berita';
+    redirect(`/rss?channel=${encodeURIComponent(categorySlug)}`);
+  }
+
   const rawKanal = slugArray[0] || 'SEMUA';
   const cleanKanal = rawKanal.replace(/-/g, ' ').toUpperCase();
 

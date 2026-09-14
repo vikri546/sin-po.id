@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import App from '../../../src/App';
 import { transformLaravelPostToArticle } from '../../../src/lib/apiClient';
 import { Article } from '../../../src/types';
@@ -234,6 +235,12 @@ export default async function DetailCatchAllPage(props: {
 }) {
   const params = await props.params;
   const slugArray = params?.slug || [];
+
+  if (slugArray.includes('feed')) {
+    const articleId = slugArray[0];
+    redirect(`/rss?articleId=${encodeURIComponent(articleId)}`);
+  }
+
   const articleId = slugArray[0];
 
   let jsonLdNewsArticle: Record<string, any> | null = null;
