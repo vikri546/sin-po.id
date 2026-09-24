@@ -546,7 +546,8 @@ export default function ArticleDetailView({
             body: JSON.stringify({
               title: article.title || '',
               author: article.author || 'Redaksi SinPo',
-              text: contentToUse
+              text: contentToUse,
+              category: article.category || ''
             }),
             signal: controller.signal,
           });

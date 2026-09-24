@@ -109,10 +109,65 @@ export function formatQuotesAndPauses(text: string): string {
 }
 
 /**
+ * Phonetic normalizer for Melayu Tionghoa & Ejaan Van Ophuijsen.
+ * Converts historical spellings (oe -> u, dj -> j, tj -> c, etc.) so neural TTS engines
+ * pronounce historical articles naturally as spoken Indonesian / classic radio broadcasts.
+ */
+export function normalizeMelayuTionghoa(text: string): string {
+  if (!text) return '';
+
+  let t = decodeHtmlEntities(text);
+
+  return t
+    // Ejaan Van Ophuijsen letter replacements (preserving case)
+    .replace(/OE/g, 'U')
+    .replace(/Oe/g, 'U')
+    .replace(/oe/g, 'u')
+    .replace(/DJ/g, 'J')
+    .replace(/Dj/g, 'J')
+    .replace(/dj/g, 'j')
+    .replace(/TJ/g, 'C')
+    .replace(/Tj/g, 'C')
+    .replace(/tj/g, 'c')
+    .replace(/NJ/g, 'NY')
+    .replace(/Nj/g, 'Ny')
+    .replace(/nj/g, 'ny')
+    // Common Melayu Tionghoa / Melayu Rendah archaic word pronunciations for natural TTS flow
+    .replace(/\bjang\b/gi, 'yang')
+    .replace(/\bJang\b/g, 'Yang')
+    .replace(/\bdengen\b/gi, 'dengan')
+    .replace(/\btaon\b/gi, 'tahun')
+    .replace(/\bboeat\b/gi, 'buat')
+    .replace(/\bsoedah\b/gi, 'sudah')
+    .replace(/\bmoesoe\b/gi, 'musuh')
+    .replace(/\bsoldadoe\b/gi, 'serdadu')
+    .replace(/\bofficier\b/gi, 'opsir')
+    .replace(/\bdemonstratie\b/gi, 'demonstrasi')
+    .replace(/\biaorang\b/gi, 'ia orang')
+    .replace(/\bpoenja\b/gi, 'punya')
+    .replace(/\bpek bin\b/gi, 'pek bin');
+}
+
+/**
+ * Automatic detector for Melayu Tionghoa / Van Ophuijsen articles
+ */
+export function isMelayuTionghoaText(text: string): boolean {
+  if (!text) return false;
+  const vanOphuijsenRegex = /\b(doeloe|djadi|djoega|tjoekoep|koeat|jang|boeat|soedah|moesoe|soldadoe|iaorang|poenja|dengen|hakhaknja|dioendjoek|anak-tjoetjoe|ditakoetin|dimaloein|belaken|ngalamken)\b/i;
+  return vanOphuijsenRegex.test(text);
+}
+
+/**
  * Full Indonesian News Text Normalization pipeline.
  * Sends the complete article text for full-length TTS audio generation.
+ * Supports specialized vintage radio broadcast voice for "Sin Po Dulu" / Melayu Tionghoa articles.
  */
-export function prepareNewsTextForTTS(title: string, author: string, contentHtmlOrText: string): string {
+export function prepareNewsTextForTTS(
+  title: string,
+  author: string,
+  contentHtmlOrText: string,
+  isSinpoDulu?: boolean
+): string {
   const safeTitle = (title || '').trim();
   
   // Clean author name (remove duplicate prefixes like "Oleh:", "Penulis:", "By ")
@@ -127,7 +182,21 @@ export function prepareNewsTextForTTS(title: string, author: string, contentHtml
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Process text normalization on full content (no character cap)
+  // Auto-detect Melayu Tionghoa if not explicitly specified
+  const isMelayu = isSinpoDulu || isMelayuTionghoaText(`${safeTitle} ${rawText}`);
+
+  if (isMelayu) {
+    const normalizedTitle = normalizeMelayuTionghoa(normalizeIndonesianAcronyms(formatIndonesianCurrency(safeTitle)));
+    const normalizedAuthor = normalizeMelayuTionghoa(normalizeIndonesianAcronyms(cleanAuthor));
+    const normalizedContent = formatQuotesAndPauses(
+      normalizeMelayuTionghoa(normalizeIndonesianAcronyms(formatIndonesianCurrency(rawText)))
+    );
+
+    // Vintage News Broadcast Intro for Sin Po Dulu
+    return `Arsip Berita Klasik Sin Po Dulu. Judul berita: ${normalizedTitle}. Wartawan: ${normalizedAuthor}. Berita selengkapnya: ${normalizedContent}`;
+  }
+
+  // Process text normalization on full content for regular news
   const normalizedTitle = normalizeIndonesianAcronyms(formatIndonesianCurrency(safeTitle));
   const normalizedAuthor = normalizeIndonesianAcronyms(cleanAuthor);
   const normalizedContent = formatQuotesAndPauses(
@@ -135,8 +204,6 @@ export function prepareNewsTextForTTS(title: string, author: string, contentHtml
   );
 
   // Construct structured news reading order: Title -> Reporter/Wartawan -> Full News Content
-  const structuredText = `Judul berita: ${normalizedTitle}. Wartawan: ${normalizedAuthor}. Berita selengkapnya: ${normalizedContent}`;
-
-  return structuredText;
+  return `Judul berita: ${normalizedTitle}. Wartawan: ${normalizedAuthor}. Berita selengkapnya: ${normalizedContent}`;
 }
 

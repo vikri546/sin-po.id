@@ -154,6 +154,9 @@ const jsonLdSitelinks = {
   ],
 };
 
+import { Suspense } from 'react';
+import GoogleAnalytics from '@/components/GoogleAnalytics';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -182,6 +185,9 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased selection:bg-red-600 selection:text-white">
+        <Suspense fallback={null}>
+          <GoogleAnalytics />
+        </Suspense>
         {children}
       </body>
     </html>

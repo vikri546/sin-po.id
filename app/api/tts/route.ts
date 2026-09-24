@@ -20,19 +20,35 @@ function ensurePublicAudioDir() {
   }
 }
 
-// Path to Orpheus-TTS virtualenv python
-const VENV_PYTHON = path.join(process.cwd(), 'Orpheus-TTS', 'venv', 'bin', 'python');
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
+}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { title, author, text, voice } = body || {};
+    const { title, author, text, voice, category, isSinpoDulu } = body || {};
+
+    const categoryStr = (category || '').toString().toLowerCase();
+    const isSinPoDuluCategory = isSinpoDulu === true || 
+      categoryStr.includes('sin po dulu') || 
+      categoryStr.includes('sin-po dulu') || 
+      categoryStr.includes('sinpodulu');
 
     let processedText = '';
 
     if (title || author) {
       // Structured News Order: Title -> Reporter/Wartawan -> Article Content
-      processedText = prepareNewsTextForTTS(title || '', author || '', text || '');
+      processedText = prepareNewsTextForTTS(title || '', author || '', text || '', isSinPoDuluCategory);
     } else if (typeof text === 'string' && text.trim().length > 0) {
       // Raw text provided
       const cleanContent = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
@@ -53,7 +69,7 @@ export async function POST(req: Request) {
     const selectedVoice = voice === 'male' ? 'id-ID-ArdiNeural' : 'id-ID-GadisNeural';
 
     // MD5 Hash for Persistent Disk & Memory Cache Key (Hashes full article text so edits automatically trigger new audio generation)
-    const cacheKey = `openvoice_${selectedVoice}_${title || ''}_${author || ''}_${textForEdge}`;
+    const cacheKey = `openvoice_${selectedVoice}_${isSinPoDuluCategory ? 'sinpodulu_' : ''}${title || ''}_${author || ''}_${textForEdge}`;
     const hash = crypto.createHash('md5').update(cacheKey).digest('hex');
     const publicFilePath = path.join(PUBLIC_AUDIO_DIR, `${hash}.mp3`);
     const publicUrl = `/audio/tts/${hash}.mp3`; // Publicly accessible URL
@@ -66,6 +82,7 @@ export async function POST(req: Request) {
         return new NextResponse(cached.buffer.slice(0), {
           status: 200,
           headers: {
+            ...corsHeaders,
             'Content-Type': 'audio/mpeg',
             'X-TTS-Cache': 'MEMORY_HIT',
             'X-TTS-Url': publicUrl,
@@ -86,6 +103,7 @@ export async function POST(req: Request) {
       return new NextResponse(arrayBuf, {
         status: 200,
         headers: {
+          ...corsHeaders,
           'Content-Type': 'audio/mpeg',
           'X-TTS-Cache': 'DISK_HIT',
           'X-TTS-Url': publicUrl,
@@ -122,15 +140,20 @@ export async function POST(req: Request) {
       const tmpTxtFilename = path.join('/tmp', `tts_input_${uid}.txt`);
       const tmpMp3Filename = path.join('/tmp', `tts_out_${uid}.mp3`);
       
-      // Send full article text (up to 10000 chars) — generate_tts.py processes 500-char chunks in parallel via asyncio.gather
+      // Send full article text — generate_tts.py processes 500-char chunks in parallel via asyncio.gather
       const textToGenerate = textForEdge.length > 100000 ? textForEdge.substring(0, 100000) : textForEdge;
 
       // Write cleaned text to temp input file
       fs.writeFileSync(tmpTxtFilename, textToGenerate, 'utf-8');
 
-      // TV News Anchor Tuning: -2Hz pitch for deep male broadcast resonance, +0Hz for crisp female anchor
-      const pitch = selectedVoice === 'id-ID-ArdiNeural' ? '-2Hz' : '+0Hz';
-      const cmd = `"${pythonBin}" "${scriptPath}" "${tmpTxtFilename}" "${tmpMp3Filename}" "${selectedVoice}" "+10%" "${pitch}"`;
+      // Vintage Radio Broadcast Tuning for Sin Po Dulu (-4Hz pitch for deep classic radio tone, +0% speed)
+      // Standard News Anchor Tuning (-2Hz pitch, +10% speech rate)
+      const rate = isSinPoDuluCategory ? '+0%' : '+10%';
+      const pitch = isSinPoDuluCategory
+        ? '-4Hz'
+        : (selectedVoice === 'id-ID-ArdiNeural' ? '-2Hz' : '+0Hz');
+
+      const cmd = `"${pythonBin}" "${scriptPath}" "${tmpTxtFilename}" "${tmpMp3Filename}" "${selectedVoice}" "${rate}" "${pitch}"`;
 
       await execAsync(cmd, { timeout: 45000 });
 
@@ -154,6 +177,7 @@ export async function POST(req: Request) {
         return new NextResponse(arrayBuf, {
           status: 200,
           headers: {
+            ...corsHeaders,
             'Content-Type': 'audio/mpeg',
             'X-TTS-Cache': 'MISS',
             'X-TTS-Engine': 'Edge-Neural-OpenVoice',
