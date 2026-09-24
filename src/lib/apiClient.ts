@@ -393,7 +393,7 @@ export function transformLaravelPostToArticle(item: any): Article {
   if (!item) {
     return {
       id: 'laravel-0',
-      title: 'Tanpa Judul',
+      title: 'SinPo.id - Matahari Indonesia',
       subtitle: '',
       summary: '',
       content: '',
@@ -408,7 +408,7 @@ export function transformLaravelPostToArticle(item: any): Article {
   }
 
   const rawId = item.id || item.id_berita || 0;
-  const title = stripHtml(item.judul || item.title || 'Tanpa Judul');
+  const title = stripHtml(item.judul || item.title || 'SinPo.id - Matahari Indonesia');
   
   // Category / Channel resolution
   const channelName = item.datachannel?.nama || item.kanal?.nama || item.channel?.name || '';
