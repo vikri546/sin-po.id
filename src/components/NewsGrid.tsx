@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import gsap from 'gsap';
-import { Bookmark, Clock, User, ArrowRight, Eye, Calendar } from 'lucide-react';
+import { Bookmark, Clock, User, ArrowRight, Calendar } from 'lucide-react';
 import { Article } from '../types';
 import { POPULAR_NEWS } from '../data/newsData';
 import Skeleton from './skeletons/Skeleton';
@@ -243,11 +243,7 @@ export default function NewsGrid({
                   <Calendar className="h-3 w-3 md:h-3.5 md:w-3.5 text-white hidden md:block" /> 
                   <span>{heroArticle.date}</span>
                 </span>
-                <span className="text-white/40 shrink-0">•</span>
-                <span className="flex items-center gap-1 shrink-0">
-                  <Eye className="h-3 w-3 md:h-3.5 md:w-3.5 text-white hidden md:block" /> 
-                  <span>{(heroArticle.views ?? heroArticle.dilihat ?? 0).toLocaleString('id-ID')} dilihat</span>
-                </span>
+                {/* Dilihat view count hidden */}
               </div>
 
               <div className="flex items-center justify-between w-full mt-1 md:mt-2 gap-2 md:gap-3">

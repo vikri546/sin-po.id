@@ -8,7 +8,7 @@ const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
 // Node.js Server-side In-Memory Cache for ultra-fast SSR responses (< 10ms)
 const serverArticleMemoryCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes cache
+const CACHE_TTL_MS = 60 * 1000; // 60 seconds cache — fast real-time CMS sync for takedowns
 
 function extractNumericId(idOrSlug: string): string {
   if (!idOrSlug) return '';
@@ -27,7 +27,15 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
     if (now - cached.timestamp < CACHE_TTL_MS) {
-      return cached.data;
+      // Verify cached article is not takedown (CMS may have set publish=0 since caching)
+      const cachedPub = String(cached.data?.publish ?? '').trim();
+      const cachedStat = String(cached.data?.status ?? '').trim();
+      if (cachedPub === '0' || cachedStat === '0') {
+        serverArticleMemoryCache.delete(cacheKey);
+        // Fall through to re-fetch from API
+      } else {
+        return cached.data;
+      }
     }
   }
 
@@ -45,7 +53,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
 
   try {
     const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
-      next: { revalidate: 600 },
+      next: { revalidate: 60 }, // 60s revalidation for real-time CMS takedown sync
       headers,
       signal: controller.signal,
     });
@@ -55,6 +63,17 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       const json = await res.json();
       const item = json?.data || json?.result || json;
       if (item && (item.judul || item.title)) {
+        // AUTO-TAKEDOWN: If CMS has publish=0, invalidate cache and return null
+        const publishVal = String(item.publish ?? '').trim();
+        const statusVal = String(item.status ?? '').trim();
+        if (publishVal === '0' || statusVal === '0') {
+          // Evict from cache so next request also sees takedown
+          serverArticleMemoryCache.delete(cacheKey);
+          if (cleanNumericId && cleanNumericId !== cacheKey) {
+            serverArticleMemoryCache.delete(cleanNumericId);
+          }
+          return null; // Takedown — do not serve this article
+        }
         serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
         if (cleanNumericId && cleanNumericId !== cacheKey) {
           serverArticleMemoryCache.set(cleanNumericId, { data: item, timestamp: now });
@@ -72,7 +91,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 800);
     try {
       const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}`, {
-        next: { revalidate: 600 },
+        next: { revalidate: 60 }, // 60s revalidation
         headers,
         signal: fallbackController.signal,
       });
@@ -81,6 +100,13 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
         const json = await res.json();
         const item = json?.data || json?.result || json;
         if (item && (item.judul || item.title)) {
+          // AUTO-TAKEDOWN check for fallback path
+          const pubVal = String(item.publish ?? '').trim();
+          const statVal = String(item.status ?? '').trim();
+          if (pubVal === '0' || statVal === '0') {
+            serverArticleMemoryCache.delete(cacheKey);
+            return null;
+          }
           serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
           return item;
         }

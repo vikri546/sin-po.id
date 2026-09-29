@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, VolumeX, Share, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Eye, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, Loader2, X, Play, Pause } from 'lucide-react';
+import { Volume2, VolumeX, Share, Share2, MessageSquare, Calendar, User, Clock, Bookmark, HelpCircle, Trash2, MessageCircle, Facebook, Instagram, Linkedin, ChevronLeft, ChevronRight, Copy, Check, Link, Loader2, X, Play, Pause } from 'lucide-react';
 import { Article } from '../types';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl, getTagUrl, getNumericId } from '@/lib/urlHelpers';
@@ -762,10 +762,7 @@ export default function ArticleDetailView({
           <span className="flex items-center gap-1.5 shrink-0">
             <Clock className="h-4 w-4 text-brand-red-600 shrink-0" /> Estimasi: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{formatTime(speechDuration)} {speechDuration >= 60 ? 'Menit' : 'Detik'}</strong>
           </span>
-          <span className="text-slate-300 dark:text-slate-700 shrink-0 select-none">•</span>
-          <span className="flex items-center gap-1.5 shrink-0">
-            <Eye className="h-4 w-4 text-brand-red-600 shrink-0" /> Dilihat: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{(liveViews ?? article.views ?? article.dilihat ?? 0).toLocaleString('id-ID')} kali</strong>
-          </span>
+          {/* Dilihat view count hidden */}
         </div>
 
         {/* Article Image / Multi-Image Slider for GALERI category */}

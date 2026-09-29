@@ -187,9 +187,21 @@ export async function incrementArticleViewCounter(articleId: string | number): P
 
 // ==========================================
 // REAL-TIME TAKEDOWN & CMS SYNC SYSTEM
-// (Matching sinpo 2 app.js reference)
+// Dynamic runtime takedown — no hardcoded IDs needed.
+// When CMS sets publish=0, the article is auto-detected
+// as takedown by isTakedownArticle() without code changes.
 // ==========================================
-export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031]);
+const _runtimeTakedownIds = new Set<number>();
+
+/** Add an article ID to the runtime takedown blacklist (called when API returns publish=0) */
+export function addTakedownId(id: number) {
+  if (id && id > 0) _runtimeTakedownIds.add(id);
+}
+
+/** Check if an article ID is in the runtime takedown blacklist */
+export function isRuntimeTakedown(id: number): boolean {
+  return id > 0 && _runtimeTakedownIds.has(id);
+}
 
 /**
  * Parse publish date from raw article data or transformed Article object for schedule checking
@@ -286,17 +298,26 @@ export function isTakedownArticle(articleOrId: any): boolean {
   const id = typeof articleOrId === 'object'
     ? Number(articleOrId.id || articleOrId.id_berita || 0)
     : Number(articleOrId);
-  if (id && TAKEDOWN_ARTICLE_IDS.has(id)) {
+
+  // 1. Check runtime takedown blacklist (populated dynamically from API responses)
+  if (id && isRuntimeTakedown(id)) {
     return true;
   }
+
   if (typeof articleOrId === 'object') {
+    // 2. CMS publish=0 means article is taken down by redaksi
     if (articleOrId.publish !== undefined && articleOrId.publish !== null && String(articleOrId.publish) === '0') {
+      // Auto-register this ID for future instant blocking (even from cache)
+      if (id > 0) addTakedownId(id);
       return true;
     }
+    // 3. CMS status=0 means article is unpublished
     if (articleOrId.status !== undefined && articleOrId.status !== null &&
         (articleOrId.status === 0 || String(articleOrId.status) === '0' || articleOrId.status === false)) {
+      if (id > 0) addTakedownId(id);
       return true;
     }
+    // 4. Scheduled articles (future publish date) are not live yet
     if (isScheduledArticle(articleOrId)) {
       return true;
     }
