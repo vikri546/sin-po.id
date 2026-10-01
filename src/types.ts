@@ -28,6 +28,9 @@ export interface Article {
   dilihat?: number;
   caption?: string;
   galleryImages?: string[];
+  publish?: string | number;
+  status?: string | number;
+  rawId?: number;
 }
 
 export interface TimelineEvent {

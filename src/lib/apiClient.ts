@@ -187,11 +187,19 @@ export async function incrementArticleViewCounter(articleId: string | number): P
 
 // ==========================================
 // REAL-TIME TAKEDOWN & CMS SYNC SYSTEM
-// Dynamic runtime takedown — no hardcoded IDs needed.
-// When CMS sets publish=0, the article is auto-detected
-// as takedown by isTakedownArticle() without code changes.
+// Dynamic runtime takedown + hardcoded fallback IDs
 // ==========================================
+export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031, 129259]);
 const _runtimeTakedownIds = new Set<number>();
+
+/** Helper to extract numeric ID from numbers, '125293', 'laravel-125293', or objects */
+export function extractNumericArticleId(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const str = String(val).trim();
+  const match = str.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 0;
+}
 
 /** Add an article ID to the runtime takedown blacklist (called when API returns publish=0) */
 export function addTakedownId(id: number) {
@@ -295,25 +303,34 @@ export function isScheduledArticle(articleOrId: any): boolean {
  */
 export function isTakedownArticle(articleOrId: any): boolean {
   if (!articleOrId) return true;
-  const id = typeof articleOrId === 'object'
-    ? Number(articleOrId.id || articleOrId.id_berita || 0)
-    : Number(articleOrId);
 
-  // 1. Check runtime takedown blacklist (populated dynamically from API responses)
-  if (id && isRuntimeTakedown(id)) {
+  let id = 0;
+  if (typeof articleOrId === 'object') {
+    id = extractNumericArticleId(articleOrId.rawId || articleOrId.id_berita || articleOrId.id);
+  } else {
+    id = extractNumericArticleId(articleOrId);
+  }
+
+  // 1. Check known hardcoded takedown IDs + dynamic runtime blacklist
+  if (id > 0 && (TAKEDOWN_ARTICLE_IDS.has(id) || isRuntimeTakedown(id))) {
     return true;
   }
 
   if (typeof articleOrId === 'object') {
+    const pubStr = articleOrId.publish !== undefined && articleOrId.publish !== null
+      ? String(articleOrId.publish).trim()
+      : '';
+    const statStr = articleOrId.status !== undefined && articleOrId.status !== null
+      ? String(articleOrId.status).trim()
+      : '';
+
     // 2. CMS publish=0 means article is taken down by redaksi
-    if (articleOrId.publish !== undefined && articleOrId.publish !== null && String(articleOrId.publish) === '0') {
-      // Auto-register this ID for future instant blocking (even from cache)
+    if (pubStr === '0') {
       if (id > 0) addTakedownId(id);
       return true;
     }
     // 3. CMS status=0 means article is unpublished
-    if (articleOrId.status !== undefined && articleOrId.status !== null &&
-        (articleOrId.status === 0 || String(articleOrId.status) === '0' || articleOrId.status === false)) {
+    if (statStr === '0' || articleOrId.status === false) {
       if (id > 0) addTakedownId(id);
       return true;
     }
@@ -554,5 +571,8 @@ export function transformLaravelPostToArticle(item: any): Article {
     views: viewsCount,
     dilihat: viewsCount,
     caption: captionText,
+    rawId: extractNumericArticleId(rawId),
+    publish: item.publish !== undefined && item.publish !== null ? String(item.publish) : '1',
+    status: item.status !== undefined && item.status !== null ? String(item.status) : '1',
   };
 }
