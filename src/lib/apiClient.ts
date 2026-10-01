@@ -342,6 +342,11 @@ export function isTakedownArticle(articleOrId: any): boolean {
   return false;
 }
 
+// Manual image overrides for articles where CMS detail API returns outdated image paths
+export const ARTICLE_IMAGE_OVERRIDES: Record<number, string> = {
+  129076: '2026/10/legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-01102026-083332.jpg',
+};
+
 /**
  * Format image URL from backend storage path
  */
@@ -351,6 +356,11 @@ export function getStorageUrl(path?: string | null): string {
   }
 
   let cleanPath = path.trim();
+
+  // Manual override for known outdated CMS detail images
+  if (cleanPath.includes('26092026-090825.jpg') || cleanPath.includes('legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-26092026')) {
+    cleanPath = ARTICLE_IMAGE_OVERRIDES[129076];
+  }
 
   // Normalize backend dev/api domain hosts if returned by CMS
   if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {

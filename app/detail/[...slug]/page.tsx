@@ -130,6 +130,11 @@ function resolveStorageUrl(path?: string | null): string {
 
   let cleanPath = path.trim();
 
+  // Manual override for known outdated CMS detail images
+  if (cleanPath.includes('26092026-090825.jpg') || cleanPath.includes('legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-26092026')) {
+    cleanPath = '2026/10/legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-01102026-083332.jpg';
+  }
+
   if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {
     try {
       const urlObj = new URL(cleanPath);
