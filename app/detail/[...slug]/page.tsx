@@ -17,14 +17,14 @@ function extractNumericId(idOrSlug: string): string {
   return match ? match[0] : str;
 }
 
-async function fetchArticleDetailFromApi(articleIdOrSlug: string, forceFresh: boolean = false) {
+async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   if (!articleIdOrSlug) return null;
 
   const cacheKey = articleIdOrSlug.trim();
   const now = Date.now();
 
-  // 1. Instant 0ms memory cache hit (unless forceFresh is requested for real-time metadata sync)
-  if (!forceFresh && serverArticleMemoryCache.has(cacheKey)) {
+  // 1. Instant 0ms memory cache hit
+  if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
     if (now - cached.timestamp < CACHE_TTL_MS) {
       // Verify cached article is not takedown (CMS may have set publish=0 since caching)
@@ -52,11 +52,11 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string, forceFresh: bo
   const timeoutId = setTimeout(() => controller.abort(), 1200);
 
   try {
-    const fetchOptions: RequestInit = forceFresh
-      ? { cache: 'no-store', headers, signal: controller.signal }
-      : { next: { revalidate: 30 }, headers, signal: controller.signal };
-
-    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, fetchOptions);
+    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
+      next: { revalidate: 60 }, // 60s revalidation for real-time CMS takedown sync
+      headers,
+      signal: controller.signal,
+    });
     clearTimeout(timeoutId);
 
     if (res.ok) {
@@ -180,11 +180,10 @@ export async function generateMetadata(props: {
     };
   }
 
-  const item = await fetchArticleDetailFromApi(articleId, true); // Force fresh CMS API data for real-time OG tags
+  const item = await fetchArticleDetailFromApi(articleId);
 
   if (item && (item.judul || item.title)) {
-    const rawTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
-    const cleanTitle = rawTitle ? `${rawTitle} - SinPo.id` : 'SinPo.id - Matahari Indonesia';
+    const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
     const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
     let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
     if (cleanSummary.length > 140) {
