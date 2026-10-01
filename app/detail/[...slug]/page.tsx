@@ -4,6 +4,10 @@ import App from '../../../src/App';
 import { transformLaravelPostToArticle } from '../../../src/lib/apiClient';
 import { Article } from '../../../src/types';
 
+// Force dynamic SSR — never serve stale ISR cache for OG meta
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
 // Node.js Server-side In-Memory Cache for ultra-fast SSR responses (< 10ms)
@@ -52,8 +56,8 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   const timeoutId = setTimeout(() => controller.abort(), 1200);
 
   try {
-    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
-      next: { revalidate: 60 }, // 60s revalidation for real-time CMS takedown sync
+    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}?_t=${Date.now()}`, {
+      cache: 'no-store', // Always fresh — critical for OG meta accuracy
       headers,
       signal: controller.signal,
     });
@@ -90,8 +94,8 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     const fallbackController = new AbortController();
     const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 800);
     try {
-      const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}`, {
-        next: { revalidate: 60 }, // 60s revalidation
+      const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}?_t=${Date.now()}`, {
+        cache: 'no-store',
         headers,
         signal: fallbackController.signal,
       });
@@ -190,7 +194,15 @@ export async function generateMetadata(props: {
       cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
     }
     const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-    const imageUrl = resolveStorageUrl(rawImage);
+    // Cache-bust OG image URL with article updated_at or current timestamp
+    // This forces social media crawlers to re-fetch the image when it changes in CMS
+    const ogCacheBuster = item.updated_at
+      ? new Date(item.updated_at).getTime()
+      : Date.now();
+    const baseImageUrl = resolveStorageUrl(rawImage);
+    const imageUrl = baseImageUrl.includes('?')
+      ? `${baseImageUrl}&v=${ogCacheBuster}`
+      : `${baseImageUrl}?v=${ogCacheBuster}`;
     const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
     const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
 

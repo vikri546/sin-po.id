@@ -157,6 +157,8 @@ export default function ArticleDetailView({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
+  // Live image URL from CMS polling — updates when redaksi changes thumbnail
+  const [liveImageUrl, setLiveImageUrl] = useState<string>(article?.imageUrl || '');
   const [fullContent, setFullContent] = useState<string>(() => {
     if (article?.id && articleContentMemoryCache.has(article.id)) {
       return articleContentMemoryCache.get(article.id)!;
@@ -238,7 +240,7 @@ export default function ArticleDetailView({
     const cleanTitle = stripHtml(article.title || '');
     const cleanSummary = stripHtml(article.summary || article.subtitle || article.content || '').slice(0, 200);
     const currentUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
-    const imageUrl = article.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
+    const imageUrl = liveImageUrl || article.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
 
     const newsArticleSchema = {
       '@context': 'https://schema.org',
@@ -295,9 +297,11 @@ export default function ArticleDetailView({
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
   useEffect(() => {
+    setLiveImageUrl(article?.imageUrl || '');
     setLiveGalleryImages(article?.galleryImages || []);
     setActiveImageIndex(0);
-  }, [article?.id, article?.galleryImages]);
+    setIsArticleNotFound(false);
+  }, [article?.id, article?.imageUrl, article?.galleryImages]);
 
   const allGalleryImages = React.useMemo(() => {
     const category = (article?.category || '').toUpperCase().trim();
@@ -305,12 +309,14 @@ export default function ArticleDetailView({
 
     // If this article is NOT from GALERI/FOTO category and has no explicit gallery images, ALWAYS treat as single-image article
     if (!isGalleryCategory && (!article?.galleryImages || article.galleryImages.length === 0)) {
-      return article?.imageUrl ? [article.imageUrl] : [];
+      const currentImg = liveImageUrl || article?.imageUrl;
+      return currentImg ? [currentImg] : [];
     }
 
     const list: string[] = [];
-    if (article?.imageUrl && !article.imageUrl.includes('placehold.co')) {
-      list.push(article.imageUrl);
+    const mainImg = liveImageUrl || article?.imageUrl;
+    if (mainImg && !mainImg.includes('placehold.co')) {
+      list.push(mainImg);
     }
     (liveGalleryImages || []).forEach((imgUrl) => {
       if (imgUrl && !list.includes(imgUrl)) {
@@ -318,7 +324,7 @@ export default function ArticleDetailView({
       }
     });
     return list;
-  }, [article?.id, article?.category, article?.imageUrl, article?.galleryImages, liveGalleryImages]);
+  }, [article?.id, article?.category, article?.imageUrl, article?.galleryImages, liveGalleryImages, liveImageUrl]);
 
   const [showCopyTooltip, setShowCopyTooltip] = useState(false);
   const handleCopyLink = () => {
@@ -427,6 +433,46 @@ export default function ArticleDetailView({
           if (!isInitial && detailData.judul && detailData.judul !== article.title) {
             // Update document title for SEO
             document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
+          }
+
+          // 4. Image URL — live edit sync (update when CMS thumbnail changes)
+          // NOTE: The listing API (/berita?limit=100) often returns a NEWER gambar_detail
+          // than the detail API (/berita/{id}). So we must NOT blindly overwrite the
+          // initial imageUrl (from listing) with potentially stale detail API data.
+          // Only update if: (a) we had no initial image, or (b) the detail API image
+          // has a newer timestamp embedded in its filename (DDMMYYYY-HHMMSS pattern).
+          const latestRawImage = detailData.gambar_detail || detailData.gambar || detailData.image || detailData.cover || detailData.thumbnail || detailData.foto || '';
+          if (latestRawImage) {
+            const latestImageUrl = getStorageUrl(latestRawImage);
+            setLiveImageUrl((prev) => {
+              // If no previous image, always accept the detail API image
+              if (!prev || prev === '' || prev.includes('sinpo-favicon') || prev.includes('sinpo-og-banner')) {
+                return latestImageUrl;
+              }
+              // If the image from detail API is the same as what we already have, keep it
+              if (prev === latestImageUrl) {
+                return prev;
+              }
+              // Images differ: listing vs detail API returned different gambar_detail.
+              // Extract timestamp from filenames to determine which is newer.
+              // Filenames contain pattern: DDMMYYYY-HHMMSS (e.g., 01102026-083332)
+              const extractTimestamp = (url: string): number => {
+                const match = url.match(/(\d{2})(\d{2})(\d{4})-(\d{2})(\d{2})(\d{2})\.\w+$/);
+                if (match) {
+                  const [, dd, mm, yyyy, hh, min, ss] = match;
+                  return new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`).getTime();
+                }
+                return 0;
+              };
+              const prevTs = extractTimestamp(prev);
+              const newTs = extractTimestamp(latestImageUrl);
+              // Only replace if the detail API image is genuinely newer
+              if (newTs > 0 && prevTs > 0 && newTs > prevTs) {
+                return latestImageUrl;
+              }
+              // Otherwise, keep the current image (from listing — the more up-to-date source)
+              return prev;
+            });
           }
 
           // 4. Sync live gallery images array
@@ -823,7 +869,7 @@ export default function ArticleDetailView({
         ) : (
           <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
             <img
-              src={article.imageUrl}
+              src={liveImageUrl || article.imageUrl}
               alt={article.title}
               referrerPolicy="no-referrer"
               onError={(e) => {
