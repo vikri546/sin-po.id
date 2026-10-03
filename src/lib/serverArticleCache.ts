@@ -19,9 +19,9 @@ const globalForCache = globalThis as unknown as {
 export const serverArticleCache: Map<string, CacheEntry> =
   globalForCache.__sinpoServerArticleCache ?? (globalForCache.__sinpoServerArticleCache = new Map());
 
-// Short TTL: dedupes generateMetadata + page render of the same request,
-// while CMS edits (image/title/takedown) appear on reload within seconds.
-export const SERVER_ARTICLE_CACHE_TTL_MS = 15 * 1000;
+// 10-minute TTL: dedupes generateMetadata + page render + social media crawler bursts,
+// while CMS webhooks instantly evict edited/takedown articles.
+export const SERVER_ARTICLE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 /** Remove every cache key belonging to an article (numeric id or slug variants). */
 export function invalidateServerArticle(articleIdOrSlug?: string | number | null): number {

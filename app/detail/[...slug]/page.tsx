@@ -42,39 +42,38 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   if (!articleIdOrSlug) return null;
 
   const cacheKey = articleIdOrSlug.trim();
+  const cleanNumericId = extractNumericId(articleIdOrSlug);
   const now = Date.now();
 
-  // 1. Instant 0ms memory cache hit
+  // 1. Instant 0ms memory cache hit (10-minute TTL)
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
     if (now - cached.timestamp < CACHE_TTL_MS) {
-      // Verify cached article is not takedown (CMS may have set publish=0 since caching)
       const cachedPub = String(cached.data?.publish ?? '').trim();
       const cachedStat = String(cached.data?.status ?? '').trim();
       if (cachedPub === '0' || cachedStat === '0') {
         serverArticleMemoryCache.delete(cacheKey);
-        // Fall through to re-fetch from API
       } else {
         return cached.data;
       }
     }
   }
 
-  const cleanNumericId = extractNumericId(articleIdOrSlug);
   const targetId = cleanNumericId || articleIdOrSlug;
 
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${API_TOKEN}`,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SinPoBot/1.0',
   };
 
-  // Increased timeout to 5000ms for reliable server-side fetches (social media scrapers wait up to 10s)
+  // Tier 1: Single detail query with 5000ms timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}?_t=${Date.now()}`, {
-      cache: 'no-store', // Always fresh — critical for OG meta accuracy
+    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
+      cache: 'no-store',
       headers,
       signal: controller.signal,
     });
@@ -84,16 +83,14 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       const json = await res.json();
       const item = json?.data || json?.result || json;
       if (item && (item.judul || item.title)) {
-        // AUTO-TAKEDOWN: If CMS has publish=0, invalidate cache and return null
         const publishVal = String(item.publish ?? '').trim();
         const statusVal = String(item.status ?? '').trim();
         if (publishVal === '0' || statusVal === '0') {
-          // Evict from cache so next request also sees takedown
           serverArticleMemoryCache.delete(cacheKey);
           if (cleanNumericId && cleanNumericId !== cacheKey) {
             serverArticleMemoryCache.delete(cleanNumericId);
           }
-          return null; // Takedown — do not serve this article
+          return null;
         }
         serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
         if (cleanNumericId && cleanNumericId !== cacheKey) {
@@ -106,34 +103,47 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     clearTimeout(timeoutId);
   }
 
-  // 2. Fast Fallback Query (3000ms timeout)
-  if (cleanNumericId && cleanNumericId !== articleIdOrSlug) {
-    const fallbackController = new AbortController();
-    const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 3000);
-    try {
-      const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers,
-        signal: fallbackController.signal,
+  // Tier 2: Search in Channel pool (/api/berita?limit=100) to bypass 60 req/min single-detail API rate limits
+  try {
+    const poolController = new AbortController();
+    const poolTimeoutId = setTimeout(() => poolController.abort(), 4000);
+    const poolRes = await fetch(`https://api.sinpo.id/api/berita?limit=100`, {
+      cache: 'no-store',
+      headers,
+      signal: poolController.signal,
+    });
+    clearTimeout(poolTimeoutId);
+
+    if (poolRes.ok) {
+      const poolJson = await poolRes.json();
+      const items = Array.isArray(poolJson?.data) ? poolJson.data : [];
+      const matchedItem = items.find((it: any) => {
+        const itId = String(it.id_berita || it.id || '').trim();
+        const itNumId = extractNumericId(itId);
+        return (cleanNumericId && itNumId === cleanNumericId) || itId === articleIdOrSlug || it.slug === articleIdOrSlug;
       });
-      clearTimeout(fallbackTimeoutId);
-      if (res.ok) {
-        const json = await res.json();
-        const item = json?.data || json?.result || json;
-        if (item && (item.judul || item.title)) {
-          // AUTO-TAKEDOWN check for fallback path
-          const pubVal = String(item.publish ?? '').trim();
-          const statVal = String(item.status ?? '').trim();
-          if (pubVal === '0' || statVal === '0') {
-            serverArticleMemoryCache.delete(cacheKey);
-            return null;
+
+      if (matchedItem && (matchedItem.judul || matchedItem.title)) {
+        const pubVal = String(matchedItem.publish ?? '').trim();
+        const statVal = String(matchedItem.status ?? '').trim();
+        if (pubVal !== '0' && statVal !== '0') {
+          serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
+          if (cleanNumericId && cleanNumericId !== cacheKey) {
+            serverArticleMemoryCache.set(cleanNumericId, { data: matchedItem, timestamp: now });
           }
-          serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
-          return item;
+          return matchedItem;
         }
       }
-    } catch (e) {
-      clearTimeout(fallbackTimeoutId);
+    }
+  } catch (e) {}
+
+  // Tier 3: Emergency Stale Cache fallback (returns last cached version instead of falling back to default site metadata)
+  if (serverArticleMemoryCache.has(cacheKey)) {
+    const cached = serverArticleMemoryCache.get(cacheKey)!;
+    const cachedPub = String(cached.data?.publish ?? '').trim();
+    const cachedStat = String(cached.data?.status ?? '').trim();
+    if (cachedPub !== '0' && cachedStat !== '0') {
+      return cached.data;
     }
   }
 

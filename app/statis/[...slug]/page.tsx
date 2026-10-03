@@ -9,7 +9,7 @@ export async function generateMetadata(props: {
   const rawTitle = slugArray[slugArray.length - 1] || 'Halaman';
   const cleanTitle = rawTitle.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const title = `${cleanTitle} – SinPo.id`;
-  const description = `Informasi resmi ${cleanTitle} portal berita SinPo.id Matahari Indonesia.`;
+  const description = `Informasi resmi ${cleanTitle}  Matahari Indonesia.`;
   const canonicalUrl = `https://sinpo.id/statis/${slugArray.join('/')}`;
 
   return {
