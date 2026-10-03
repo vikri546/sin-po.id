@@ -289,7 +289,7 @@ export default function ArticleDetailView({
   }, [article]);
 
   // Article Not Found state (takedown / schedule / 404)
-  const [isArticleNotFound, setIsArticleNotFound] = useState(false);
+  const [isArticleNotFound, setIsArticleNotFound] = useState(() => isTakedownArticle(article) || isScheduledArticle(article));
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Multi-Image Gallery Slider states
@@ -309,8 +309,8 @@ export default function ArticleDetailView({
     }
     setLiveGalleryImages(article?.galleryImages || []);
     setActiveImageIndex(0);
-    setIsArticleNotFound(false);
-  }, [article?.id, article?.imageUrl, article?.galleryImages]);
+    setIsArticleNotFound(isTakedownArticle(article) || isScheduledArticle(article));
+  }, [article]);
 
   const allGalleryImages = React.useMemo(() => {
     const category = (article?.category || '').toUpperCase().trim();

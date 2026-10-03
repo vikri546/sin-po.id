@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
+import { redirect, notFound } from 'next/navigation';
 import App from '../../../src/App';
-import { transformLaravelPostToArticle } from '../../../src/lib/apiClient';
+import { transformLaravelPostToArticle, isTakedownArticle } from '../../../src/lib/apiClient';
 import { Article } from '../../../src/types';
 
 // Force dynamic SSR — never serve stale ISR cache for OG meta
@@ -45,13 +45,23 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   const cleanNumericId = extractNumericId(articleIdOrSlug);
   const now = Date.now();
 
+  // Instant check: if numeric ID or string slug is blacklisted as takedown, return null immediately
+  if (
+    (cleanNumericId && isTakedownArticle(Number(cleanNumericId))) ||
+    isTakedownArticle(articleIdOrSlug)
+  ) {
+    serverArticleMemoryCache.delete(cacheKey);
+    if (cleanNumericId && cleanNumericId !== cacheKey) {
+      serverArticleMemoryCache.delete(cleanNumericId);
+    }
+    return null;
+  }
+
   // 1. Instant 0ms memory cache hit (10-minute TTL)
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
     if (now - cached.timestamp < CACHE_TTL_MS) {
-      const cachedPub = String(cached.data?.publish ?? '').trim();
-      const cachedStat = String(cached.data?.status ?? '').trim();
-      if (cachedPub === '0' || cachedStat === '0') {
+      if (isTakedownArticle(cached.data)) {
         serverArticleMemoryCache.delete(cacheKey);
       } else {
         return cached.data;
@@ -83,9 +93,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       const json = await res.json();
       const item = json?.data || json?.result || json;
       if (item && (item.judul || item.title)) {
-        const publishVal = String(item.publish ?? '').trim();
-        const statusVal = String(item.status ?? '').trim();
-        if (publishVal === '0' || statusVal === '0') {
+        if (isTakedownArticle(item)) {
           serverArticleMemoryCache.delete(cacheKey);
           if (cleanNumericId && cleanNumericId !== cacheKey) {
             serverArticleMemoryCache.delete(cleanNumericId);
@@ -124,9 +132,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       });
 
       if (matchedItem && (matchedItem.judul || matchedItem.title)) {
-        const pubVal = String(matchedItem.publish ?? '').trim();
-        const statVal = String(matchedItem.status ?? '').trim();
-        if (pubVal !== '0' && statVal !== '0') {
+        if (!isTakedownArticle(matchedItem)) {
           serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
           if (cleanNumericId && cleanNumericId !== cacheKey) {
             serverArticleMemoryCache.set(cleanNumericId, { data: matchedItem, timestamp: now });
@@ -140,9 +146,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   // Tier 3: Emergency Stale Cache fallback (returns last cached version instead of falling back to default site metadata)
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
-    const cachedPub = String(cached.data?.publish ?? '').trim();
-    const cachedStat = String(cached.data?.status ?? '').trim();
-    if (cachedPub !== '0' && cachedStat !== '0') {
+    if (!isTakedownArticle(cached.data)) {
       return cached.data;
     }
   }
@@ -205,104 +209,42 @@ export async function generateMetadata(props: {
   const articleId = getArticleIdFromSlugArray(slugArray);
 
   if (!articleId) {
-    return getSlugFallbackMetadata(slugArray);
+    notFound();
+  }
+
+  const cleanNumId = extractNumericId(articleId);
+  if ((cleanNumId && isTakedownArticle(Number(cleanNumId))) || isTakedownArticle(articleId)) {
+    notFound();
   }
 
   const item = await fetchArticleDetailFromApi(articleId);
 
-  if (item && (item.judul || item.title)) {
-    const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
-    const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
-    let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
-    if (cleanSummary.length > 140) {
-      cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
-    }
-    const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-    // Use clean static image URL (without ?v= query) for 100% WhatsApp / Facebook scraper compatibility
-    const imageUrl = resolveStorageUrl(rawImage);
-    const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
-    const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
-
-    let imageMimeType = 'image/jpeg';
-    const lowerImg = imageUrl.toLowerCase();
-    if (lowerImg.endsWith('.png')) imageMimeType = 'image/png';
-    else if (lowerImg.endsWith('.webp')) imageMimeType = 'image/webp';
-    else if (lowerImg.endsWith('.gif')) imageMimeType = 'image/gif';
-
-    return {
-      metadataBase: new URL('https://sinpo.id'),
-      title: cleanTitle,
-      description: cleanSummary || cleanTitle,
-      robots: {
-        index: true,
-        follow: true,
-        'max-image-preview': 'large',
-        'max-snippet': -1,
-        'max-video-preview': -1,
-      },
-      alternates: {
-        canonical: canonicalUrl,
-      },
-      icons: {
-        icon: [
-          { url: 'https://sinpo.id/sinpo-favicon.png', type: 'image/png' },
-          { url: 'https://sinpo.id/favicon.ico', sizes: 'any' },
-        ],
-        shortcut: 'https://sinpo.id/sinpo-favicon.png',
-        apple: 'https://sinpo.id/sinpo-favicon.png',
-      },
-      openGraph: {
-        title: cleanTitle,
-        description: cleanSummary || cleanTitle,
-        url: canonicalUrl,
-        siteName: 'SinPo.id',
-        images: [
-          {
-            url: imageUrl,
-            secureUrl: imageUrl,
-            width: 1200,
-            height: 630,
-            type: imageMimeType,
-            alt: cleanTitle,
-          },
-        ],
-        locale: 'id_ID',
-        type: 'article',
-        publishedTime: item.tanggal_tayang || item.published_at || item.created_at,
-        authors: [typeof authorName === 'string' ? authorName : 'Redaksi SinPo'],
-      },
-      twitter: {
-        card: 'summary_large_image',
-        site: '@sinpotv',
-        creator: '@sinpotv',
-        title: cleanTitle,
-        description: cleanSummary || cleanTitle,
-        images: [
-          {
-            url: imageUrl,
-            alt: cleanTitle,
-            width: 1200,
-            height: 630,
-          },
-        ],
-      },
-    };
+  if (!item || (!item.judul && !item.title) || isTakedownArticle(item)) {
+    notFound();
   }
 
-  return getSlugFallbackMetadata(slugArray);
-}
-
-function getSlugFallbackMetadata(slugArray: string[]): Metadata {
-  const rawSlug = slugArray.slice(1).join(' ') || slugArray[0] || '';
-  const fallbackTitle = rawSlug
-    ? rawSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    : 'Berita SinPo.id';
+  const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
+  const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
+  let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+  if (cleanSummary.length > 140) {
+    cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
+  }
+  const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
+  // Use clean static image URL (without ?v= query) for 100% WhatsApp / Facebook scraper compatibility
+  const imageUrl = resolveStorageUrl(rawImage);
   const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
+  const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
+
+  let imageMimeType = 'image/jpeg';
+  const lowerImg = imageUrl.toLowerCase();
+  if (lowerImg.endsWith('.png')) imageMimeType = 'image/png';
+  else if (lowerImg.endsWith('.webp')) imageMimeType = 'image/webp';
+  else if (lowerImg.endsWith('.gif')) imageMimeType = 'image/gif';
 
   return {
     metadataBase: new URL('https://sinpo.id'),
-    title: fallbackTitle,
-    description: fallbackTitle,
+    title: cleanTitle,
+    description: cleanSummary || cleanTitle,
     robots: {
       index: true,
       follow: true,
@@ -322,33 +264,35 @@ function getSlugFallbackMetadata(slugArray: string[]): Metadata {
       apple: 'https://sinpo.id/sinpo-favicon.png',
     },
     openGraph: {
-      title: fallbackTitle,
-      description: fallbackTitle,
+      title: cleanTitle,
+      description: cleanSummary || cleanTitle,
       url: canonicalUrl,
       siteName: 'SinPo.id',
       images: [
         {
-          url: 'https://sinpo.id/sinpo-og-banner.png',
-          secureUrl: 'https://sinpo.id/sinpo-og-banner.png',
+          url: imageUrl,
+          secureUrl: imageUrl,
           width: 1200,
           height: 630,
-          type: 'image/png',
-          alt: fallbackTitle,
+          type: imageMimeType,
+          alt: cleanTitle,
         },
       ],
       locale: 'id_ID',
       type: 'article',
+      publishedTime: item.tanggal_tayang || item.published_at || item.created_at,
+      authors: [typeof authorName === 'string' ? authorName : 'Redaksi SinPo'],
     },
     twitter: {
       card: 'summary_large_image',
       site: '@sinpotv',
       creator: '@sinpotv',
-      title: fallbackTitle,
-      description: fallbackTitle,
+      title: cleanTitle,
+      description: cleanSummary || cleanTitle,
       images: [
         {
-          url: 'https://sinpo.id/sinpo-og-banner.png',
-          alt: fallbackTitle,
+          url: imageUrl,
+          alt: cleanTitle,
           width: 1200,
           height: 630,
         },
@@ -369,80 +313,81 @@ export default async function DetailCatchAllPage(props: {
   }
 
   const articleId = getArticleIdFromSlugArray(slugArray);
-
-  let jsonLdNewsArticle: Record<string, any> | null = null;
-  let initialArticle: Article | null = null;
-
-  if (articleId) {
-    const item = await fetchArticleDetailFromApi(articleId);
-
-    if (item && (item.judul || item.title)) {
-      initialArticle = transformLaravelPostToArticle(item);
-
-      const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
-      const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
-      let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
-      if (cleanSummary.length > 180) {
-        cleanSummary = cleanSummary.slice(0, 177).trim() + '...';
-      }
-      const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-      const imageUrl = resolveStorageUrl(rawImage);
-      const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
-      const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
-      const channelName = item.datachannel?.nama || item.datakategori?.nama || item.kanal?.nama || item.kategori?.nama || item.category || 'POLITIK';
-      const pubDate = item.tanggal_tayang || item.published_at || item.created_at || new Date().toISOString();
-
-      jsonLdNewsArticle = {
-        '@context': 'https://schema.org',
-        '@type': 'NewsArticle',
-        'mainEntityOfPage': {
-          '@type': 'WebPage',
-          '@id': canonicalUrl,
-        },
-        'headline': cleanTitle,
-        'description': cleanSummary,
-        'articleSection': String(channelName).toUpperCase(),
-        'image': [imageUrl],
-        'datePublished': pubDate,
-        'dateModified': item.updated_at || pubDate,
-        'author': [
-          {
-            '@type': 'Person',
-            'name': typeof authorName === 'string' ? authorName : 'Redaksi SinPo',
-            'jobTitle': 'Jurnalis',
-            'url': 'https://sinpo.id',
-          },
-        ],
-        'publisher': {
-          '@type': 'Organization',
-          'name': 'SinPo.id',
-          'url': 'https://sinpo.id',
-          'logo': {
-            '@type': 'ImageObject',
-            'url': 'https://sinpo.id/sinpo-favicon.png',
-            'width': 512,
-            'height': 512,
-          },
-        },
-        'isAccessibleForFree': true,
-        'inLanguage': 'id-ID',
-      };
-    } else {
-      const cleanId = extractNumericId(articleId);
-      initialArticle = transformLaravelPostToArticle({ id: cleanId || articleId, judul: '' });
-    }
+  if (!articleId) {
+    notFound();
   }
+
+  const cleanNumId = extractNumericId(articleId);
+  if ((cleanNumId && isTakedownArticle(Number(cleanNumId))) || isTakedownArticle(articleId)) {
+    notFound();
+  }
+
+  const item = await fetchArticleDetailFromApi(articleId);
+
+  if (!item || (!item.judul && !item.title) || isTakedownArticle(item)) {
+    notFound();
+  }
+
+  const initialArticle = transformLaravelPostToArticle(item);
+
+  const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
+  const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
+  let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
+  if (cleanSummary.length > 180) {
+    cleanSummary = cleanSummary.slice(0, 177).trim() + '...';
+  }
+  const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
+  const imageUrl = resolveStorageUrl(rawImage);
+  const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
+  const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
+  const channelName = item.datachannel?.nama || item.datakategori?.nama || item.kanal?.nama || item.kategori?.nama || item.category || 'POLITIK';
+  const pubDate = item.tanggal_tayang || item.published_at || item.created_at || new Date().toISOString();
+
+  const jsonLdNewsArticle = {
+    '@context': 'https://schema.org',
+    '@type': 'NewsArticle',
+    'mainEntityOfPage': {
+      '@type': 'WebPage',
+      '@id': canonicalUrl,
+    },
+    'headline': cleanTitle,
+    'description': cleanSummary,
+    'articleSection': String(channelName).toUpperCase(),
+    'image': [imageUrl],
+    'datePublished': pubDate,
+    'dateModified': item.updated_at || pubDate,
+    'author': [
+      {
+        '@type': 'Person',
+        'name': typeof authorName === 'string' ? authorName : 'Redaksi SinPo',
+        'jobTitle': 'Jurnalis',
+        'url': 'https://sinpo.id',
+      },
+    ],
+    'publisher': {
+      '@type': 'Organization',
+      'name': 'SinPo.id',
+      'url': 'https://sinpo.id',
+      'logo': {
+        '@type': 'ImageObject',
+        'url': 'https://sinpo.id/sinpo-favicon.png',
+        'width': 512,
+        'height': 512,
+      },
+    },
+    'isAccessibleForFree': true,
+    'inLanguage': 'id-ID',
+  };
 
   return (
     <>
-      {jsonLdNewsArticle && (
-        <script
-          id="newsarticle-jsonld-ssr"
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdNewsArticle) }}
-        />
-      )}
+      <script
+        id="newsarticle-jsonld-ssr"
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdNewsArticle) }}
+      />
       <App initialArticle={initialArticle} />
     </>
   );
 }
+

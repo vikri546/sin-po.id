@@ -279,8 +279,10 @@ export function isScheduledArticle(articleOrId: any): boolean {
     return true;
   }
 
-  // If status is explicitly unpublished (0), it is takedown, not scheduled
-  if (pubStr === '0' || statStr === '0') {
+  // If status is explicitly unpublished (0/draft/pending), it is takedown, not scheduled
+  const isUnpublishedFlag = (val: string) =>
+    val === '0' || val === 'false' || val === 'draft' || val === 'draf' || val === 'pending';
+  if (isUnpublishedFlag(pubStr) || isUnpublishedFlag(statStr) || articleOrId.publish === false || articleOrId.status === false) {
     return false;
   }
 
@@ -298,7 +300,7 @@ export function isScheduledArticle(articleOrId: any): boolean {
 }
 
 /**
- * Check if article is taken down or scheduled (not live yet)
+ * Check if article is taken down, draft, unpublished, or scheduled (not live yet)
  * (Matching sinpo 2 isTakedownArticle)
  */
 export function isTakedownArticle(articleOrId: any): boolean {
@@ -318,27 +320,44 @@ export function isTakedownArticle(articleOrId: any): boolean {
 
   if (typeof articleOrId === 'object') {
     const pubStr = articleOrId.publish !== undefined && articleOrId.publish !== null
-      ? String(articleOrId.publish).trim()
+      ? String(articleOrId.publish).toLowerCase().trim()
       : '';
     const statStr = articleOrId.status !== undefined && articleOrId.status !== null
-      ? String(articleOrId.status).trim()
+      ? String(articleOrId.status).toLowerCase().trim()
       : '';
 
-    // 2. CMS publish=0 means article is taken down by redaksi
-    if (pubStr === '0') {
+    const isUnpublishedFlag = (val: string) =>
+      val === '0' ||
+      val === 'false' ||
+      val === 'draft' ||
+      val === 'draf' ||
+      val === 'pending' ||
+      val === 'private' ||
+      val === 'hidden' ||
+      val === 'archived' ||
+      val === 'inactive' ||
+      val === 'tak_tayang' ||
+      val === 'nonactive';
+
+    // 2. CMS publish or status flags indicating draft / unpublished / takedown / private / hidden
+    if (
+      isUnpublishedFlag(pubStr) ||
+      isUnpublishedFlag(statStr) ||
+      articleOrId.publish === false ||
+      articleOrId.status === false ||
+      articleOrId.is_published === false ||
+      articleOrId.published === false
+    ) {
       if (id > 0) addTakedownId(id);
       return true;
     }
-    // 3. CMS status=0 means article is unpublished
-    if (statStr === '0' || articleOrId.status === false) {
-      if (id > 0) addTakedownId(id);
-      return true;
-    }
-    // 4. Scheduled articles (future publish date) are not live yet
+
+    // 3. Scheduled articles (future publish date) are not live yet
     if (isScheduledArticle(articleOrId)) {
       return true;
     }
   }
+
   return false;
 }
 

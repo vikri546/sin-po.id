@@ -201,11 +201,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     return null;
   });
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(() => {
-    if (initialArticle) return initialArticle;
+    if (initialArticle) {
+      if (isTakedownArticle(initialArticle)) return null;
+      return initialArticle;
+    }
     if (typeof window !== 'undefined') {
       const targetArticleIdOrSlug = parseArticleTargetFromUrl();
       if (targetArticleIdOrSlug) {
         const cleanId = getNumericId(targetArticleIdOrSlug);
+        if (
+          (cleanId && isTakedownArticle(Number(cleanId))) ||
+          isTakedownArticle(targetArticleIdOrSlug)
+        ) {
+          return null;
+        }
         try {
           const savedMaster = localStorage.getItem('sinpo_cached_master_articles_v1');
           if (savedMaster) {
@@ -215,11 +224,10 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 const aNumId = getNumericId(a.id);
                 return aNumId === cleanId || a.id === targetArticleIdOrSlug || a.slug === targetArticleIdOrSlug;
               });
-              if (matched) return matched;
+              if (matched && !isTakedownArticle(matched)) return matched;
             }
           }
         } catch {}
-        return transformLaravelPostToArticle({ id: cleanId || targetArticleIdOrSlug, judul: '' });
       }
     }
     return null;
