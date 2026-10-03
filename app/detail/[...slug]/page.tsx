@@ -195,7 +195,7 @@ export async function generateMetadata(props: {
   const articleId = getArticleIdFromSlugArray(slugArray);
 
   if (!articleId) {
-    return getFallbackArticleMetadata();
+    return getFallbackSiteMetadata();
   }
 
   const item = await fetchArticleDetailFromApi(articleId);
@@ -223,6 +223,13 @@ export async function generateMetadata(props: {
       metadataBase: new URL('https://sinpo.id'),
       title: cleanTitle,
       description: cleanSummary || cleanTitle,
+      robots: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
       alternates: {
         canonical: canonicalUrl,
       },
@@ -257,21 +264,36 @@ export async function generateMetadata(props: {
       twitter: {
         card: 'summary_large_image',
         site: '@sinpotv',
+        creator: '@sinpotv',
         title: cleanTitle,
         description: cleanSummary || cleanTitle,
-        images: [imageUrl],
+        images: [
+          {
+            url: imageUrl,
+            alt: cleanTitle,
+            width: 1200,
+            height: 630,
+          },
+        ],
       },
     };
   }
 
-  return getFallbackArticleMetadata();
+  return getFallbackSiteMetadata();
 }
 
-function getFallbackArticleMetadata(): Metadata {
+function getFallbackSiteMetadata(): Metadata {
   return {
     metadataBase: new URL('https://sinpo.id'),
-    title: 'Berita SinPo.id',
-    description: 'Portal Berita SinPo.id',
+    title: 'SinPo.id - Matahari Indonesia',
+    description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+    robots: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
     icons: {
       icon: [
         { url: 'https://sinpo.id/sinpo-favicon.png', type: 'image/png' },
@@ -281,8 +303,8 @@ function getFallbackArticleMetadata(): Metadata {
       apple: 'https://sinpo.id/sinpo-favicon.png',
     },
     openGraph: {
-      title: 'Berita SinPo.id',
-      description: 'Portal Berita SinPo.id',
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
       url: 'https://sinpo.id',
       siteName: 'SinPo.id',
       images: [
@@ -292,18 +314,26 @@ function getFallbackArticleMetadata(): Metadata {
           width: 1200,
           height: 630,
           type: 'image/png',
-          alt: 'Berita SinPo.id',
+          alt: 'SinPo.id - Matahari Indonesia',
         },
       ],
       locale: 'id_ID',
-      type: 'article',
+      type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
       site: '@sinpotv',
-      title: 'Berita SinPo.id',
-      description: 'Portal Berita SinPo.id',
-      images: ['https://sinpo.id/sinpo-og-banner.png'],
+      creator: '@sinpotv',
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      images: [
+        {
+          url: 'https://sinpo.id/sinpo-og-banner.png',
+          alt: 'SinPo.id - Matahari Indonesia',
+          width: 1200,
+          height: 630,
+        },
+      ],
     },
   };
 }
