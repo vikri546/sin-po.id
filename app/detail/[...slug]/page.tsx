@@ -16,8 +16,26 @@ import { serverArticleCache as serverArticleMemoryCache, SERVER_ARTICLE_CACHE_TT
 function extractNumericId(idOrSlug: string): string {
   if (!idOrSlug) return '';
   const str = String(idOrSlug).trim();
-  const match = str.match(/\d+/);
-  return match ? match[0] : str;
+  if (/^\d+$/.test(str)) return str;
+
+  // Look for SinPo article numeric ID format (5-7 digits) anywhere in the string
+  const fivePlusMatch = str.match(/\b\d{5,7}\b/) || str.match(/(\d{5,7})/);
+  if (fivePlusMatch) return fivePlusMatch[1] || fivePlusMatch[0];
+
+  // Fallback: match the last digit sequence in the string
+  const lastDigitMatch = str.match(/(\d+)(?:[^\d]*)$/);
+  return lastDigitMatch ? lastDigitMatch[1] : str;
+}
+
+function getArticleIdFromSlugArray(slugArray: string[]): string {
+  if (!slugArray || slugArray.length === 0) return '';
+  for (const part of slugArray) {
+    const extracted = extractNumericId(part);
+    if (/^\d{5,7}$/.test(extracted)) {
+      return extracted;
+    }
+  }
+  return extractNumericId(slugArray[0]);
 }
 
 async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
@@ -50,9 +68,9 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     'Authorization': `Bearer ${API_TOKEN}`,
   };
 
-  // Fast AbortController to limit HTTP request duration to 1200ms max
+  // Increased timeout to 5000ms for reliable server-side fetches (social media scrapers wait up to 10s)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1200);
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
     const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}?_t=${Date.now()}`, {
@@ -88,10 +106,10 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     clearTimeout(timeoutId);
   }
 
-  // 2. Fast Fallback Query
+  // 2. Fast Fallback Query (3000ms timeout)
   if (cleanNumericId && cleanNumericId !== articleIdOrSlug) {
     const fallbackController = new AbortController();
-    const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 800);
+    const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 3000);
     try {
       const res = await fetch(`https://api.sinpo.id/api/berita/${articleIdOrSlug}?_t=${Date.now()}`, {
         cache: 'no-store',
@@ -174,13 +192,10 @@ export async function generateMetadata(props: {
 }): Promise<Metadata> {
   const params = await props.params;
   const slugArray = params?.slug || [];
-  const articleId = slugArray[0];
+  const articleId = getArticleIdFromSlugArray(slugArray);
 
   if (!articleId) {
-    return {
-      title: 'SinPo.id - Matahari Indonesia',
-      description: 'SinPo.id adalah portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari seluruh Indonesia secara tajam dan berimbang.',
-    };
+    return getFallbackSiteMetadata();
   }
 
   const item = await fetchArticleDetailFromApi(articleId);
@@ -193,15 +208,8 @@ export async function generateMetadata(props: {
       cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
     }
     const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-    // Cache-bust OG image URL with article updated_at or current timestamp
-    // This forces social media crawlers to re-fetch the image when it changes in CMS
-    const ogCacheBuster = item.updated_at
-      ? new Date(item.updated_at).getTime()
-      : Date.now();
-    const baseImageUrl = resolveStorageUrl(rawImage);
-    const imageUrl = baseImageUrl.includes('?')
-      ? `${baseImageUrl}&v=${ogCacheBuster}`
-      : `${baseImageUrl}?v=${ogCacheBuster}`;
+    // Use clean static image URL (without ?v= query) for 100% WhatsApp / Facebook scraper compatibility
+    const imageUrl = resolveStorageUrl(rawImage);
     const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
     const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
 
@@ -213,7 +221,7 @@ export async function generateMetadata(props: {
 
     return {
       metadataBase: new URL('https://sinpo.id'),
-      title: cleanTitle,
+      title: `${cleanTitle} - SinPo.id`,
       description: cleanSummary,
       alternates: {
         canonical: canonicalUrl,
@@ -256,13 +264,46 @@ export async function generateMetadata(props: {
     };
   }
 
+  return getFallbackSiteMetadata();
+}
+
+function getFallbackSiteMetadata(): Metadata {
   return {
     metadataBase: new URL('https://sinpo.id'),
     title: 'SinPo.id - Matahari Indonesia',
     description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
     icons: {
-      icon: 'https://sinpo.id/sinpo-favicon.png',
+      icon: [
+        { url: 'https://sinpo.id/sinpo-favicon.png', type: 'image/png' },
+        { url: 'https://sinpo.id/favicon.ico', sizes: 'any' },
+      ],
       shortcut: 'https://sinpo.id/sinpo-favicon.png',
+      apple: 'https://sinpo.id/sinpo-favicon.png',
+    },
+    openGraph: {
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      url: 'https://sinpo.id',
+      siteName: 'SinPo.id',
+      images: [
+        {
+          url: 'https://sinpo.id/sinpo-og-banner.png',
+          secureUrl: 'https://sinpo.id/sinpo-og-banner.png',
+          width: 1200,
+          height: 630,
+          type: 'image/png',
+          alt: 'SinPo.id - Matahari Indonesia',
+        },
+      ],
+      locale: 'id_ID',
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      site: '@sinpotv',
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      images: ['https://sinpo.id/sinpo-og-banner.png'],
     },
   };
 }
@@ -274,11 +315,11 @@ export default async function DetailCatchAllPage(props: {
   const slugArray = params?.slug || [];
 
   if (slugArray.includes('feed')) {
-    const articleId = slugArray[0];
+    const articleId = getArticleIdFromSlugArray(slugArray);
     redirect(`/rss?articleId=${encodeURIComponent(articleId)}`);
   }
 
-  const articleId = slugArray[0];
+  const articleId = getArticleIdFromSlugArray(slugArray);
 
   let jsonLdNewsArticle: Record<string, any> | null = null;
   let initialArticle: Article | null = null;
