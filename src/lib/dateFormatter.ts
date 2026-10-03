@@ -132,6 +132,11 @@ export function parseAnyDate(dateStr?: string | Date | null): Date {
   if (parseable.includes(' ') && !parseable.includes('T')) {
     parseable = parseable.replace(' ', 'T');
   }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(parseable)) {
+    parseable = `${parseable}+07:00`;
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(parseable)) {
+    parseable = `${parseable}:00+07:00`;
+  }
   const directDate = new Date(parseable);
   if (!isNaN(directDate.getTime())) {
     return directDate;

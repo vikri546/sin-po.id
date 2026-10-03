@@ -190,7 +190,6 @@ export async function incrementArticleViewCounter(articleId: string | number): P
 // Dynamic runtime takedown + hardcoded fallback IDs
 // ==========================================
 export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031, 129259, 129503]);
-const _runtimeTakedownIds = new Set<number>();
 
 /** Helper to extract numeric ID from numbers, '125293', 'laravel-125293', or objects */
 export function extractNumericArticleId(val: any): number {
@@ -201,14 +200,12 @@ export function extractNumericArticleId(val: any): number {
   return match ? parseInt(match[0], 10) : 0;
 }
 
-/** Add an article ID to the runtime takedown blacklist (called when API returns publish=0) */
-export function addTakedownId(id: number) {
-  if (id && id > 0) _runtimeTakedownIds.add(id);
-}
+/** Legacy stub for backward compatibility */
+export function addTakedownId(_id: number) {}
 
-/** Check if an article ID is in the runtime takedown blacklist */
-export function isRuntimeTakedown(id: number): boolean {
-  return id > 0 && _runtimeTakedownIds.has(id);
+/** Legacy stub for backward compatibility */
+export function isRuntimeTakedown(_id: number): boolean {
+  return false;
 }
 
 /**
@@ -279,17 +276,22 @@ export function isScheduledArticle(articleOrId: any): boolean {
     return true;
   }
 
+  // If publish/status is explicitly published (1 / '1' / true), it is LIVE!
+  if (pubStr === '1' || statStr === '1' || articleOrId.publish === 1 || articleOrId.status === 1) {
+    return false;
+  }
+
   // If status is explicitly unpublished (0), it is takedown, not scheduled
   if (pubStr === '0' || statStr === '0') {
     return false;
   }
 
-  // Check future publish timestamp (combining tanggal_tayang + waktu)
+  // Check future publish timestamp (combining tanggal_tayang + waktu) with 60s buffer
   const pubDate = parseArticlePublishDate(articleOrId);
   if (pubDate) {
     const now = Date.now();
-    // If publish date/time is in the future by > 5 seconds, it's scheduled (not live yet)
-    if (pubDate.getTime() > now + 5000) {
+    // If publish date/time is in the future by > 60 seconds, it's scheduled (not live yet)
+    if (pubDate.getTime() > now + 60000) {
       return true;
     }
   }
@@ -311,8 +313,8 @@ export function isTakedownArticle(articleOrId: any): boolean {
     id = extractNumericArticleId(articleOrId);
   }
 
-  // 1. Check known hardcoded takedown IDs + dynamic runtime blacklist
-  if (id > 0 && (TAKEDOWN_ARTICLE_IDS.has(id) || isRuntimeTakedown(id))) {
+  // 1. Check known hardcoded takedown IDs
+  if (id > 0 && TAKEDOWN_ARTICLE_IDS.has(id)) {
     return true;
   }
 
@@ -326,12 +328,10 @@ export function isTakedownArticle(articleOrId: any): boolean {
 
     // 2. CMS publish=0 means article is taken down by redaksi
     if (pubStr === '0') {
-      if (id > 0) addTakedownId(id);
       return true;
     }
     // 3. CMS status=0 means article is unpublished
     if (statStr === '0' || articleOrId.status === false) {
-      if (id > 0) addTakedownId(id);
       return true;
     }
     // 4. Scheduled articles (future publish date) are not live yet
