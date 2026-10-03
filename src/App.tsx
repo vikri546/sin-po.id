@@ -264,6 +264,47 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   const masterLiveArticlesRef = useRef<Article[]>(initialMasterArticles || []);
   const hasInitialFetchedRef = useRef<boolean>(false);
 
+  // Lock headline article at position 0 (isHero: true) and sort rest by date to eliminate headline blinking
+  const lockHeadlineAtFront = useCallback((articles: Article[], targetHeadlineId?: string | null): Article[] => {
+    if (!articles || articles.length === 0) return [];
+
+    let headlineId = targetHeadlineId || masterHeadlineIdRef.current;
+    let headlineArt: Article | null = null;
+
+    if (headlineId) {
+      headlineArt = articles.find(a => a.id === headlineId) || null;
+    }
+    if (!headlineArt) {
+      headlineArt = articles.find(a => a.isHero || (a as any).isHeadline || (a as any).headline === '1' || (a as any).headline === 1) || null;
+    }
+    if (!headlineArt) {
+      headlineArt = articles[0];
+    }
+
+    if (headlineArt) {
+      masterHeadlineIdRef.current = headlineArt.id;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('sinpo_cached_headline_id_v1', headlineArt.id);
+        } catch {}
+      }
+
+      const rest = articles.filter(a => a.id !== headlineArt.id);
+      rest.sort((a, b) => {
+        const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
+        const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
+        return timeB - timeA;
+      });
+
+      return [
+        { ...headlineArt, isHero: true },
+        ...rest.map(a => ({ ...a, isHero: false }))
+      ];
+    }
+
+    return articles;
+  }, []);
+
   // Safe Post-Hydration Sync (runs ONLY on client after initial SSR hydration pass, preventing hydration mismatch)
   useEffect(() => {
     try {
@@ -282,38 +323,10 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
       if (savedMaster && (!initialMasterArticles || initialMasterArticles.length === 0)) {
         const parsed = JSON.parse(savedMaster);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          let headlineId = savedHeadlineId || masterHeadlineIdRef.current;
-          if (!headlineId && parsed.length > 0) {
-            const h = parsed.find((a: Article) => a.isHero) || parsed[0];
-            headlineId = h.id;
-          }
-          if (headlineId) {
-            masterHeadlineIdRef.current = headlineId;
-          }
-          const cleanParsed = parsed.map((a: Article) => ({
-            ...a,
-            isHero: headlineId ? a.id === headlineId : false
-          }));
-
-          if (headlineId) {
-            const idx = cleanParsed.findIndex((a: Article) => a.id === headlineId);
-            if (idx > 0) {
-              const hArt = cleanParsed[idx];
-              hArt.isHero = true;
-              const rest = cleanParsed.filter((a: Article) => a.id !== headlineId);
-              setMasterLiveArticles([hArt, ...rest]);
-              setArticlesState([hArt, ...rest]);
-              masterLiveArticlesRef.current = [hArt, ...rest];
-            } else {
-              setMasterLiveArticles(cleanParsed);
-              setArticlesState(cleanParsed);
-              masterLiveArticlesRef.current = cleanParsed;
-            }
-          } else {
-            setMasterLiveArticles(parsed);
-            setArticlesState(parsed);
-            masterLiveArticlesRef.current = parsed;
-          }
+          const lockedParsed = lockHeadlineAtFront(parsed, savedHeadlineId);
+          setMasterLiveArticles(lockedParsed);
+          setArticlesState(lockedParsed);
+          masterLiveArticlesRef.current = lockedParsed;
           setIsLoadingContent(false);
         }
       }
@@ -416,36 +429,27 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
             validArticles = [{ ...headlineArt, isHero: true }, ...remaining.map(a => ({ ...a, isHero: false }))];
           }
 
-          // Merge fresh live articles into existing master live pool
+          // Merge fresh live articles into existing master live pool with LOCKED Headline at position 0
           setMasterLiveArticles(prev => {
             const existingIds = new Set(validArticles.map(a => a.id));
             const oldHistorical = prev.filter(a => !existingIds.has(a.id));
-            const merged = [...validArticles, ...oldHistorical];
-            merged.sort((a, b) => {
-              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
-              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
-              return timeB - timeA;
-            });
-            masterLiveArticlesRef.current = merged;
+            const rawMerged = [...validArticles, ...oldHistorical];
+            const lockedMerged = lockHeadlineAtFront(rawMerged, headlineArt?.id);
+            masterLiveArticlesRef.current = lockedMerged;
             if (typeof window !== 'undefined') {
               try {
-                localStorage.setItem('sinpo_cached_master_articles_v1', JSON.stringify(merged.slice(0, 100)));
+                localStorage.setItem('sinpo_cached_master_articles_v1', JSON.stringify(lockedMerged.slice(0, 100)));
               } catch {}
             }
-            return merged;
+            return lockedMerged;
           });
 
-          // Also merge into active articlesState without wiping out older paginated articles
+          // Also merge into active articlesState with LOCKED Headline at position 0
           setArticlesState(prev => {
             const existingIds = new Set(validArticles.map(a => a.id));
             const oldHistorical = prev.filter(a => !existingIds.has(a.id));
-            const merged = [...validArticles, ...oldHistorical];
-            merged.sort((a, b) => {
-              const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
-              const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
-              return timeB - timeA;
-            });
-            return merged;
+            const rawMerged = [...validArticles, ...oldHistorical];
+            return lockHeadlineAtFront(rawMerged, headlineArt?.id);
           });
 
           // Update Breaking Ticker from top 5 newest items
@@ -471,7 +475,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
     } catch (err) {
       console.log('SinPo Live REST API /berita notice:', err);
     }
-  }, []);
+  }, [lockHeadlineAtFront]);
 
   useEffect(() => {
     // Initial fetch once on mount
@@ -546,26 +550,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
         ? masterLiveArticles 
         : (masterLiveArticlesRef.current.length > 0 ? masterLiveArticlesRef.current : articlesState);
       if (rawLiveList.length > 0) {
-        const headlineId = masterHeadlineIdRef.current;
-        let cleanLiveList = rawLiveList.map(a => ({
-          ...a,
-          isHero: headlineId ? a.id === headlineId : false
-        }));
-
-        if (headlineId) {
-          const headlineIndex = cleanLiveList.findIndex(a => a.id === headlineId);
-          if (headlineIndex > 0) {
-            const headlineItem = cleanLiveList[headlineIndex];
-            headlineItem.isHero = true;
-            const rest = cleanLiveList.filter(a => a.id !== headlineId);
-            cleanLiveList = [headlineItem, ...rest];
-          } else if (headlineIndex === 0) {
-            cleanLiveList[0].isHero = true;
-          }
-        } else {
-          cleanLiveList[0].isHero = true;
-        }
-
+        const cleanLiveList = lockHeadlineAtFront(rawLiveList);
         setArticlesState(cleanLiveList);
         if (isMounted) finishLoading(150);
       } else {
