@@ -11,7 +11,7 @@ export const revalidate = 0;
 
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
-// Node.js Server-side In-Memory Cache (shared with /api/revalidate webhook for instant invalidation)
+// Node.js Server-side In-Memory Cache
 import { serverArticleCache as serverArticleMemoryCache, SERVER_ARTICLE_CACHE_TTL_MS as CACHE_TTL_MS } from '../../../src/lib/serverArticleCache';
 
 function extractNumericId(idOrSlug: string): string {
@@ -19,13 +19,15 @@ function extractNumericId(idOrSlug: string): string {
   const str = String(idOrSlug).trim();
   if (/^\d+$/.test(str)) return str;
 
-  // Look for SinPo article numeric ID format (5-7 digits) anywhere in the string
-  const fivePlusMatch = str.match(/\b\d{5,7}\b/) || str.match(/(\d{5,7})/);
-  if (fivePlusMatch) return fivePlusMatch[1] || fivePlusMatch[0];
+  // PERBAIKAN: Cari format ID spesifik di ujung akhir slug dengan tanda hubung (misal: -123456)
+  const endMatch = str.match(/-(\d{4,8})$/);
+  if (endMatch) return endMatch[1];
 
-  // Fallback: match the last digit sequence in the string
-  const lastDigitMatch = str.match(/(\d+)(?:[^\d]*)$/);
-  return lastDigitMatch ? lastDigitMatch[1] : str;
+  // PERBAIKAN: Fallback cari 5-8 digit terisolasi (menghindari salah ambil angka '20' dari 'g20')
+  const boundaryMatch = str.match(/\b(\d{5,8})\b/);
+  if (boundaryMatch) return boundaryMatch[1];
+
+  return str; // Kembalikan string utuh jika tidak ditemukan ID angka yang valid
 }
 
 function getArticleIdFromSlugArray(slugArray: string[]): string {
@@ -40,13 +42,7 @@ function getArticleIdFromSlugArray(slugArray: string[]): string {
 }
 
 /**
- * 6-Tier Robust Article Fetcher for SinPo.id:
- * Tier 1: Instant Server Memory Cache (0ms)
- * Tier 2: Direct Single-Detail API (/api/berita/{id}) with 6000ms timeout + 1x retry
- * Tier 3: Latest Articles Pool API (/api/berita?limit=100)
- * Tier 4: Keyword Search Query API (/api/berita?q={keyword}&limit=30) for older articles by slug
- * Tier 5: Emergency Stale Server Memory Cache Fallback
- * Tier 6: Gate — Confirmed Takedown / Missing (triggers 404)
+ * 6-Tier Robust Article Fetcher for SinPo.id
  */
 async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   if (!articleIdOrSlug) return null;
@@ -64,7 +60,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     if (cleanNumericId && cleanNumericId !== cacheKey) {
       serverArticleMemoryCache.delete(cleanNumericId);
     }
-    return null;
+    return { isTakedown: true };
   }
 
   // TIER 1: Instant 0ms Server Memory Cache Hit
@@ -73,16 +69,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     if (now - cached.timestamp < CACHE_TTL_MS) {
       if (isTakedownArticle(cached.data)) {
         serverArticleMemoryCache.delete(cacheKey);
-      } else {
-        return cached.data;
-      }
-    }
-  }
-  if (cleanNumericId && serverArticleMemoryCache.has(cleanNumericId)) {
-    const cached = serverArticleMemoryCache.get(cleanNumericId)!;
-    if (now - cached.timestamp < CACHE_TTL_MS) {
-      if (isTakedownArticle(cached.data)) {
-        serverArticleMemoryCache.delete(cleanNumericId);
+        return { isTakedown: true };
       } else {
         return cached.data;
       }
@@ -97,7 +84,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SinPoBot/1.0',
   };
 
-  // TIER 2: Direct Single-Detail API Query (/api/berita/{targetId}) with timeout + 1x retry
+  // TIER 2: Direct Single-Detail API Query
   if (cleanNumericId || /^\d+$/.test(targetId)) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
@@ -117,15 +104,9 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
           if (item && (item.judul || item.title)) {
             if (isTakedownArticle(item)) {
               serverArticleMemoryCache.delete(cacheKey);
-              if (cleanNumericId && cleanNumericId !== cacheKey) {
-                serverArticleMemoryCache.delete(cleanNumericId);
-              }
-              return null;
+              return { isTakedown: true };
             }
             serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
-            if (cleanNumericId && cleanNumericId !== cacheKey) {
-              serverArticleMemoryCache.set(cleanNumericId, { data: item, timestamp: now });
-            }
             return item;
           }
         }
@@ -138,7 +119,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     }
   }
 
-  // TIER 3: Latest Channel Pool API (/api/berita?limit=100)
+  // TIER 3: Latest Channel Pool API
   try {
     const poolController = new AbortController();
     const poolTimeoutId = setTimeout(() => poolController.abort(), 5000);
@@ -165,18 +146,14 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       });
 
       if (matchedItem && (matchedItem.judul || matchedItem.title)) {
-        if (!isTakedownArticle(matchedItem)) {
-          serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
-          if (cleanNumericId && cleanNumericId !== cacheKey) {
-            serverArticleMemoryCache.set(cleanNumericId, { data: matchedItem, timestamp: now });
-          }
-          return matchedItem;
-        }
+        if (isTakedownArticle(matchedItem)) return { isTakedown: true };
+        serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
+        return matchedItem;
       }
     }
   } catch (e) {}
 
-  // TIER 4: Keyword Search Query API (/api/berita?q={keyword}&limit=30) for older articles by slug/title
+  // TIER 4: Keyword Search Query API
   try {
     const rawWords = articleIdOrSlug.replace(/-/g, ' ').replace(/[^\w\s]/g, '').trim().split(/\s+/).filter(w => w.length >= 4);
     const firstKeyword = rawWords[0] || articleIdOrSlug;
@@ -207,33 +184,22 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
         });
 
         if (matchedItem && (matchedItem.judul || matchedItem.title)) {
-          if (!isTakedownArticle(matchedItem)) {
-            serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
-            if (cleanNumericId && cleanNumericId !== cacheKey) {
-              serverArticleMemoryCache.set(cleanNumericId, { data: matchedItem, timestamp: now });
-            }
-            return matchedItem;
-          }
+          if (isTakedownArticle(matchedItem)) return { isTakedown: true };
+          serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
+          return matchedItem;
         }
       }
     }
   } catch (e) {}
 
-  // TIER 5: Emergency Stale Server Memory Cache Fallback (ignoring TTL expiration)
+  // TIER 5: Emergency Stale Server Memory Cache Fallback
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
-    if (!isTakedownArticle(cached.data)) {
-      return cached.data;
-    }
-  }
-  if (cleanNumericId && serverArticleMemoryCache.has(cleanNumericId)) {
-    const cached = serverArticleMemoryCache.get(cleanNumericId)!;
-    if (!isTakedownArticle(cached.data)) {
-      return cached.data;
-    }
+    if (isTakedownArticle(cached.data)) return { isTakedown: true };
+    return cached.data;
   }
 
-  // TIER 6: Gate — Confirmed Takedown / Missing (triggers 404)
+  // PERBAIKAN: Jangan memicu 404 hanya karena semua fetch gagal, biarkan nilainya null untuk dihandle Skeleton
   return null;
 }
 
@@ -291,9 +257,7 @@ export async function generateMetadata(props: {
   const slugArray = params?.slug || [];
   const articleId = getArticleIdFromSlugArray(slugArray);
 
-  if (!articleId) {
-    notFound();
-  }
+  if (!articleId) notFound();
 
   const cleanNumId = extractNumericId(articleId);
   if ((cleanNumId && isTakedownArticle(Number(cleanNumId))) || isTakedownArticle(articleId)) {
@@ -302,8 +266,23 @@ export async function generateMetadata(props: {
 
   const item = await fetchArticleDetailFromApi(articleId);
 
-  if (!item || (!item.judul && !item.title) || isTakedownArticle(item)) {
+  // PERBAIKAN: Jika item adalah objek takedown explicitly
+  if (item && item.isTakedown) {
     notFound();
+  }
+
+  // PERBAIKAN: Jika item gagal diload (NULL/Timeout) - Jangan Tampilkan 404! 
+  // Berikan metadadata fallback agar NextJS bisa melanjutkan render dan client fetcher mengambil datanya.
+  if (!item || (!item.judul && !item.title)) {
+    const fallbackTitle = slugArray.join(' ').replace(/-/g, ' ').toUpperCase();
+    const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
+    return {
+      metadataBase: new URL('https://sinpo.id'),
+      title: `${fallbackTitle} - SinPo.id`,
+      description: 'Memuat detail berita...',
+      alternates: { canonical: canonicalUrl },
+      robots: { index: false, follow: true },
+    };
   }
 
   const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
@@ -313,7 +292,6 @@ export async function generateMetadata(props: {
     cleanSummary = cleanSummary.slice(0, 137).trim() + '...';
   }
   const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
-  // Use clean static image URL (without ?v= query) for 100% WhatsApp / Facebook scraper compatibility
   const imageUrl = resolveStorageUrl(rawImage);
   const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
   const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
@@ -396,35 +374,59 @@ export default async function DetailCatchAllPage(props: {
   }
 
   const articleId = getArticleIdFromSlugArray(slugArray);
-  if (!articleId) {
-    notFound();
-  }
+  if (!articleId) notFound();
 
   const cleanNumId = extractNumericId(articleId);
   if ((cleanNumId && isTakedownArticle(Number(cleanNumId))) || isTakedownArticle(articleId)) {
     notFound();
   }
 
-  const item = await fetchArticleDetailFromApi(articleId);
+  const fetchedItem = await fetchArticleDetailFromApi(articleId);
 
-  if (!item || (!item.judul && !item.title) || isTakedownArticle(item)) {
+  // Jika item eksplisit mengkonfirmasi ini adalah takedown
+  if (fetchedItem && fetchedItem.isTakedown) {
     notFound();
   }
 
-  const initialArticle = transformLaravelPostToArticle(item);
+  // PERBAIKAN PENTING: Jangan buat halaman error 404 jika API SSR sekadar timeout (NULL)! 
+  // Generate Fake Skeleton Item untuk menjebatani client-side React merender Skeleton.
+  let itemToProcess = fetchedItem;
+  let isFallback = false;
 
-  const cleanTitle = (item.judul || item.title || '').replace(/<[^>]*>?/gm, '').trim();
-  const rawSummary = item.ringkasan || item.excerpt || item.sub_judul || item.subtitle || item.isi || '';
+  if (!fetchedItem || (!fetchedItem.judul && !fetchedItem.title)) {
+    isFallback = true;
+    itemToProcess = {
+      id_berita: cleanNumId || articleId,
+      slug: slugArray.join('/'),
+      judul: 'Sedang memuat konten...',
+      ringkasan: 'Mengambil data dari server...',
+      isi: '<p>Memuat berita...</p>',
+      kategori: { nama: 'BERITA' },
+      tanggal_tayang: new Date().toISOString(),
+      author: 'Redaksi SinPo',
+      gambar_detail: ''
+    };
+  }
+
+  const initialArticle = transformLaravelPostToArticle(itemToProcess);
+  
+  // Tag property khusus untuk memberi sinyal ke komponen Client
+  if (isFallback) {
+    (initialArticle as any).isFallback = true;
+  }
+
+  const cleanTitle = (itemToProcess.judul || itemToProcess.title || '').replace(/<[^>]*>?/gm, '').trim();
+  const rawSummary = itemToProcess.ringkasan || itemToProcess.excerpt || itemToProcess.sub_judul || itemToProcess.subtitle || itemToProcess.isi || '';
   let cleanSummary = rawSummary.replace(/<[^>]*>?/gm, '').replace(/\s+/g, ' ').trim();
   if (cleanSummary.length > 180) {
     cleanSummary = cleanSummary.slice(0, 177).trim() + '...';
   }
-  const rawImage = item.gambar_detail || item.gambar || item.image || item.cover || item.thumbnail || item.foto || '';
+  const rawImage = itemToProcess.gambar_detail || itemToProcess.gambar || itemToProcess.image || itemToProcess.cover || itemToProcess.thumbnail || itemToProcess.foto || '';
   const imageUrl = resolveStorageUrl(rawImage);
   const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
-  const authorName = item.datawartawan?.nama_wartawan || (typeof item.penulis === 'object' ? item.penulis.nama : item.penulis) || (typeof item.wartawan === 'object' ? item.wartawan.nama_wartawan : item.wartawan) || item.author || 'Redaksi SinPo';
-  const channelName = item.datachannel?.nama || item.datakategori?.nama || item.kanal?.nama || item.kategori?.nama || item.category || 'POLITIK';
-  const pubDate = item.tanggal_tayang || item.published_at || item.created_at || new Date().toISOString();
+  const authorName = itemToProcess.datawartawan?.nama_wartawan || (typeof itemToProcess.penulis === 'object' ? itemToProcess.penulis.nama : itemToProcess.penulis) || (typeof itemToProcess.wartawan === 'object' ? itemToProcess.wartawan.nama_wartawan : itemToProcess.wartawan) || itemToProcess.author || 'Redaksi SinPo';
+  const channelName = itemToProcess.datachannel?.nama || itemToProcess.datakategori?.nama || itemToProcess.kanal?.nama || itemToProcess.kategori?.nama || itemToProcess.category || 'POLITIK';
+  const pubDate = itemToProcess.tanggal_tayang || itemToProcess.published_at || itemToProcess.created_at || new Date().toISOString();
 
   const jsonLdNewsArticle = {
     '@context': 'https://schema.org',
@@ -438,7 +440,7 @@ export default async function DetailCatchAllPage(props: {
     'articleSection': String(channelName).toUpperCase(),
     'image': [imageUrl],
     'datePublished': pubDate,
-    'dateModified': item.updated_at || pubDate,
+    'dateModified': itemToProcess.updated_at || pubDate,
     'author': [
       {
         '@type': 'Person',
@@ -473,4 +475,3 @@ export default async function DetailCatchAllPage(props: {
     </>
   );
 }
-

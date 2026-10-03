@@ -25,11 +25,8 @@ import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCo
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
-// In-memory cache for fetched article detail body HTML
 const articleContentMemoryCache = new Map<string, string>();
-// In-memory cache for generated audio Blob URLs per article ID
 const articleAudioUrlMemoryCache = new Map<string, string>();
-
 
 const buildInitialContent = (art: Article | null): string => {
   if (!art) return '';
@@ -54,8 +51,6 @@ const calculateSpeechDuration = (title?: string, author?: string, content?: stri
   return Math.max(30, Math.round((words / 160) * 60));
 };
 
-
-
 export default function ArticleDetailView({
   article,
   onBack,
@@ -71,25 +66,447 @@ export default function ArticleDetailView({
   onSelectTag,
   isLoading = false
 }: ArticleDetailViewProps) {
-  if (isLoading && (!article || !article.title)) {
+  
+  // PERBAIKAN: Buat State Lokal (Local Article) agar Data yang ter-fetch secara otomatis mengganti Skeleton
+  const [localArticle, setLocalArticle] = useState<Article>(article);
+  const [isFallbackMode, setIsFallbackMode] = useState<boolean>(() => (article as any).isFallback || article?.title === 'Sedang memuat konten...');
+
+  // Sinkronisasi data ketika prop article di-push oleh navigasi induk
+  useEffect(() => {
+    setLocalArticle(article);
+    setIsFallbackMode((article as any).isFallback || article?.title === 'Sedang memuat konten...');
+  }, [article]);
+
+  const isSkeletonMode = isLoading || !localArticle || !localArticle.title || isFallbackMode;
+
+  const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [isAudioActive, setIsAudioActive] = useState(false);
+  const [speechProgress, setSpeechProgress] = useState(0); 
+  const [speechDuration, setSpeechDuration] = useState(() => calculateSpeechDuration(localArticle?.title, localArticle?.author, localArticle?.content));
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [isDragging, setIsDragging] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  const [liveViews, setLiveViews] = useState<number | null>(null);
+  const [liveImageUrl, setLiveImageUrl] = useState<string>(localArticle?.imageUrl || '');
+  const [fullContent, setFullContent] = useState<string>(() => {
+    if (localArticle?.id && articleContentMemoryCache.has(localArticle.id)) {
+      return articleContentMemoryCache.get(localArticle.id)!;
+    }
+    return localArticle?.content || (localArticle as any)?.isi || localArticle?.summary || localArticle?.subtitle || '';
+  });
+  
+  const [isFetchingDetail, setIsFetchingDetail] = useState<boolean>(() => {
+    if (localArticle?.id && articleContentMemoryCache.has(localArticle.id)) return false;
+    const existing = localArticle?.content || (localArticle as any)?.isi || '';
+    return stripHtml(existing).trim().length < 80;
+  });
+
+  useEffect(() => {
+    if (!localArticle || isSkeletonMode) return;
+    const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+    const seconds = calculateSpeechDuration(localArticle.title, localArticle.author, contentToUse);
+    setSpeechDuration(seconds);
+    setSpeechProgress(0);
+    setLiveViews(null);
+  }, [localArticle, fullContent, isSkeletonMode]);
+
+  useEffect(() => {
+    if (!localArticle?.id || isSkeletonMode) return;
+    const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+    const textSig = `${localArticle.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
+    if (articleAudioUrlMemoryCache.has(textSig)) return;
+
+    const timer = setTimeout(() => {
+      if (!contentToUse) return;
+      fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: localArticle.title || '',
+          author: localArticle.author || 'Redaksi SinPo',
+          text: contentToUse,
+        }),
+      })
+        .then((res) => res.ok ? res.blob() : null)
+        .then((blob) => {
+          if (blob) {
+            const audioUrl = URL.createObjectURL(blob);
+            articleAudioUrlMemoryCache.set(textSig, audioUrl);
+          }
+        })
+        .catch(() => {});
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [localArticle?.id, fullContent, isSkeletonMode]);
+
+  useEffect(() => {
+    if (!localArticle || isSkeletonMode) return;
+    if (localArticle.id && articleContentMemoryCache.has(localArticle.id)) {
+      const cached = articleContentMemoryCache.get(localArticle.id)!;
+      setFullContent(cached);
+      setIsFetchingDetail(false);
+    } else {
+      const bestContent = localArticle.content || (localArticle as any)?.isi || localArticle.summary || localArticle.subtitle || '';
+      setFullContent(bestContent);
+      const textLen = stripHtml(bestContent).trim().length;
+      setIsFetchingDetail(textLen < 80);
+    }
+  }, [localArticle?.id, localArticle?.content, isSkeletonMode]);
+
+  useEffect(() => {
+    if (!localArticle || isSkeletonMode) return;
+    const cleanTitle = stripHtml(localArticle.title || '');
+    const cleanSummary = stripHtml(localArticle.summary || localArticle.subtitle || localArticle.content || '').slice(0, 200);
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(localArticle)}`;
+    const imageUrl = liveImageUrl || localArticle.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
+
+    const newsArticleSchema = {
+      '@context': 'https://schema.org',
+      '@type': 'NewsArticle',
+      'mainEntityOfPage': { '@type': 'WebPage', '@id': currentUrl },
+      'headline': cleanTitle,
+      'description': cleanSummary,
+      'articleSection': (localArticle.category || 'POLITIK').toUpperCase(),
+      'image': [imageUrl],
+      'datePublished': localArticle.date || new Date().toISOString(),
+      'dateModified': localArticle.date || new Date().toISOString(),
+      'author': [{ '@type': 'Person', 'name': localArticle.author || 'Redaksi SinPo', 'jobTitle': 'Jurnalis', 'url': 'https://sinpo.id' }],
+      'publisher': {
+        '@type': 'Organization',
+        'name': 'SinPo.id',
+        'url': 'https://sinpo.id',
+        'logo': { '@type': 'ImageObject', 'url': 'https://sinpo.id/sinpo-favicon.png', 'width': 512, 'height': 512 },
+      },
+      'isAccessibleForFree': true,
+      'inLanguage': 'id-ID',
+    };
+
+    let scriptTag = document.getElementById('newsarticle-jsonld-client') as HTMLScriptElement;
+    if (!scriptTag) {
+      scriptTag = document.createElement('script');
+      scriptTag.id = 'newsarticle-jsonld-client';
+      scriptTag.type = 'application/ld+json';
+      document.head.appendChild(scriptTag);
+    }
+    scriptTag.textContent = JSON.stringify(newsArticleSchema);
+  }, [localArticle, liveImageUrl, isSkeletonMode]);
+
+  const [isArticleNotFound, setIsArticleNotFound] = useState(() => isTakedownArticle(localArticle) || isScheduledArticle(localArticle));
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => localArticle?.galleryImages || []);
+  const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
+  const prevArticleIdRef = useRef<string | null>(localArticle?.id || null);
+
+  useEffect(() => {
+    const isSameArticle = prevArticleIdRef.current === localArticle?.id;
+    prevArticleIdRef.current = localArticle?.id || null;
+
+    if (isSameArticle) {
+      setLiveImageUrl((prev) => pickNewerImageUrl(prev, localArticle?.imageUrl));
+    } else {
+      setLiveImageUrl(localArticle?.imageUrl || '');
+    }
+    setLiveGalleryImages(localArticle?.galleryImages || []);
+    setActiveImageIndex(0);
+    setIsArticleNotFound(isTakedownArticle(localArticle) || isScheduledArticle(localArticle));
+  }, [localArticle]);
+
+  const allGalleryImages = React.useMemo(() => {
+    const category = (localArticle?.category || '').toUpperCase().trim();
+    const isGalleryCategory = category === 'GALERI' || category === 'FOTO';
+    if (!isGalleryCategory && (!localArticle?.galleryImages || localArticle.galleryImages.length === 0)) {
+      const currentImg = liveImageUrl || localArticle?.imageUrl;
+      return currentImg ? [currentImg] : [];
+    }
+    const list: string[] = [];
+    const mainImg = liveImageUrl || localArticle?.imageUrl;
+    if (mainImg && !mainImg.includes('placehold.co')) list.push(mainImg);
+    (liveGalleryImages || []).forEach((imgUrl) => {
+      if (imgUrl && !list.includes(imgUrl)) list.push(imgUrl);
+    });
+    return list;
+  }, [localArticle?.id, localArticle?.category, localArticle?.imageUrl, localArticle?.galleryImages, liveGalleryImages, liveImageUrl]);
+
+  const [showCopyTooltip, setShowCopyTooltip] = useState(false);
+  const handleCopyLink = () => {
+    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(localArticle)}`;
+    navigator.clipboard.writeText(targetUrl).then(() => {
+      setShowCopyTooltip(true);
+      setTimeout(() => setShowCopyTooltip(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleNativeShare = async () => {
+    if (!localArticle) return;
+    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(localArticle)}`;
+    const shareData = {
+      title: stripHtml(localArticle.title),
+      text: stripHtml(localArticle.summary || localArticle.subtitle || localArticle.title),
+      url: targetUrl,
+    };
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try { await navigator.share(shareData); } catch (err: any) { if (err?.name !== 'AbortError') handleCopyLink(); }
+    } else { handleCopyLink(); }
+  };
+
+  const extractViewCount = (data: any): number => {
+    if (typeof data.counter === 'number') return data.counter;
+    if (typeof data.dilihat === 'number') return data.dilihat;
+    if (typeof data.views === 'number') return data.views;
+    return parseInt(data.counter || data.dilihat || data.views || '0', 10) || 0;
+  };
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    let isMounted = true;
+
+    if (!isFallbackMode && (isTakedownArticle(localArticle) || isScheduledArticle(localArticle))) {
+      setIsArticleNotFound(true);
+      return;
+    }
+    setIsArticleNotFound(false);
+
+    const rawId = localArticle.id.replace('laravel-', '');
+    const numericId = getNumericId(localArticle.id) || rawId;
+    const targetIdOrSlug = numericId || (localArticle as any).slug || rawId;
+    let hasIncrementedCounter = false;
+
+    async function fetchArticleDetail(isInitial: boolean = false) {
+      try {
+        const res = await apiFetch(`/berita/${targetIdOrSlug}`);
+        if (!isMounted) return;
+
+        if (res && res.data) {
+          const detailData = res.data as any;
+
+          if (isTakedownArticle(detailData) || isScheduledArticle(detailData)) {
+            setIsArticleNotFound(true);
+            return;
+          }
+          setIsArticleNotFound(false);
+
+          // Jika ini hasil tarikan fallback, matikan mode fallback (Matikan Skeleton)
+          if (isFallbackMode && isInitial && detailData.judul) {
+            setIsFallbackMode(false);
+            setLocalArticle(prev => ({
+              ...prev,
+              title: stripHtml(detailData.judul),
+              author: detailData.datawartawan?.nama_wartawan || (typeof detailData.penulis === 'object' ? detailData.penulis.nama : detailData.penulis) || 'Redaksi SinPo',
+              category: detailData.datachannel?.nama || detailData.datakategori?.nama || detailData.kanal?.nama || 'BERITA',
+              date: detailData.tanggal_tayang || detailData.published_at || prev.date,
+              imageUrl: getStorageUrl(detailData.gambar_detail || detailData.gambar || '') || prev.imageUrl,
+            }));
+            document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
+          }
+
+          if (isInitial && !hasIncrementedCounter) {
+            hasIncrementedCounter = true;
+            incrementArticleViewCounter(localArticle.id).then((newCount) => {
+              if (isMounted && newCount && newCount > 0) setLiveViews((prev) => Math.max(prev ?? 0, newCount));
+            });
+          }
+
+          const fetchedCount = extractViewCount(detailData);
+          setLiveViews(prev => Math.max(prev ?? 0, localArticle.views ?? 0, localArticle.dilihat ?? 0, fetchedCount));
+
+          const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
+          if (fetchedContent) {
+            if (localArticle?.id) articleContentMemoryCache.set(localArticle.id, fetchedContent);
+            setFullContent(fetchedContent);
+            setIsFetchingDetail(false);
+          }
+
+          if (!isInitial && detailData.judul && detailData.judul !== localArticle.title) {
+            document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
+          }
+
+          const latestRawImage = detailData.gambar_detail || detailData.gambar || detailData.image || detailData.cover || detailData.thumbnail || detailData.foto || '';
+          if (latestRawImage) {
+            setLiveImageUrl((prev) => pickNewerImageUrl(prev, getStorageUrl(latestRawImage)));
+          }
+
+          const rawGal = detailData.datagallery || detailData.datagambar || detailData.galeri || detailData.images || [];
+          if (Array.isArray(rawGal) && rawGal.length > 0) {
+            const parsedGal = rawGal.map((g: any) => {
+              if (typeof g === 'string') return getStorageUrl(g);
+              const photoPath = g.nama_photo || g.foto || g.gambar || g.photo || g.url || g.image || '';
+              return getStorageUrl(photoPath);
+            }).filter(Boolean);
+            if (parsedGal.length > 0) setLiveGalleryImages(parsedGal);
+            else setLiveGalleryImages(localArticle?.galleryImages || []);
+          } else {
+            setLiveGalleryImages(localArticle?.galleryImages || []);
+          }
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+        // PERBAIKAN: Client baru akan men-trigger 404 jika response API jelas adalah 404 dan bukan transient issue
+        if ((!localArticle?.title || isFallbackMode || isTakedownArticle(localArticle)) && (err?.status === 404 || err?.isNotFound)) {
+          setIsArticleNotFound(true);
+        }
+      } finally {
+        if (isMounted && isInitial) setIsFetchingDetail(false);
+      }
+    }
+
+    fetchArticleDetail(true);
+
+    pollingRef.current = setInterval(() => { fetchArticleDetail(false); }, 30000);
+    function handleVisibilityChange() { if (document.visibilityState === 'visible' && isMounted) fetchArticleDetail(false); }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [localArticle.id, (localArticle as any).slug, isFallbackMode]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [localArticle?.id]);
+
+  const toggleSpeech = async () => {
+    if (!localArticle || isLoadingAudio) return;
+    if (audioRef.current && audioRef.current.src) {
+      if (isSpeaking) {
+        audioRef.current.pause();
+        setIsSpeaking(false);
+      } else {
+        if (audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration) audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+        setIsSpeaking(true);
+      }
+      return;
+    }
+
+    try {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      setIsAudioActive(true);
+      setIsLoadingAudio(true);
+      setIsSpeaking(false);
+
+      const audio = new Audio();
+      audio.playbackRate = playbackRate;
+      audioRef.current = audio;
+
+      const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+      const textSig = localArticle.id ? `${localArticle.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}` : '';
+      let audioUrl = textSig ? articleAudioUrlMemoryCache.get(textSig) : undefined;
+
+      if (!audioUrl) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 50000);
+        try {
+          const res = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: localArticle.title || '',
+              author: localArticle.author || 'Redaksi SinPo',
+              text: contentToUse,
+              category: localArticle.category || ''
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            const blob = await res.blob();
+            audioUrl = URL.createObjectURL(blob);
+            if (textSig) articleAudioUrlMemoryCache.set(textSig, audioUrl);
+          } else { throw new Error('Gagal memuat audio penyiar berita'); }
+        } catch (fetchErr: any) {
+          clearTimeout(timeoutId);
+          setIsLoadingAudio(false);
+          setIsSpeaking(false);
+          setIsAudioActive(false);
+          onShare('Gagal memuat audio penyiar berita.');
+          return;
+        }
+      }
+
+      if (audioUrl && audioRef.current === audio) {
+        audio.src = audioUrl;
+        audio.onloadedmetadata = () => { if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) setSpeechDuration(audio.duration); };
+        audio.ondurationchange = () => { if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) setSpeechDuration(audio.duration); };
+        audio.ontimeupdate = () => { if (!isDragging) setSpeechProgress(audio.currentTime); };
+        audio.onended = () => { setIsSpeaking(false); };
+        audio.onerror = () => { setIsSpeaking(false); setIsLoadingAudio(false); setIsAudioActive(false); onShare('Gagal memutar audio berita.'); };
+        try {
+          await audio.play();
+          setIsSpeaking(true);
+          setIsLoadingAudio(false);
+        } catch (playErr) {
+          setIsSpeaking(true);
+          setIsLoadingAudio(false);
+        }
+      }
+    } catch (e: any) {
+      setIsSpeaking(false);
+      setIsLoadingAudio(false);
+      onShare('Gagal memuat audio berita.');
+    }
+  };
+
+  const stopSpeech = () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; audioRef.current = null; }
+    setIsSpeaking(false);
+    setIsLoadingAudio(false);
+    setIsAudioActive(false);
+    setSpeechProgress(0);
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackRate(speed);
+    if (audioRef.current) audioRef.current.playbackRate = speed;
+  };
+
+  const handleSeek = (newSeconds: number) => {
+    setSpeechProgress(newSeconds);
+    if (audioRef.current) audioRef.current.currentTime = newSeconds;
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  const isBookmarked = (bookmarkedIds || []).includes(localArticle?.id || '');
+
+  const handleShareClick = () => {
+    if (!localArticle) return;
+    const url = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(localArticle)}`;
+    if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    onShare("Tautan artikel berhasil disalin ke papan klip!");
+  };
+
+  // Render Skeleton jika state masih di mode kerangka Fallback (API Server tadinya gagal memuat data utuh)
+  if (isSkeletonMode) {
     return (
       <article className="w-full flex flex-col gap-8 animate-fade-in">
         <div className="flex flex-col gap-6">
-          {/* Category & Date Badge */}
           <div className="flex items-center justify-center md:justify-start gap-2">
             <Skeleton className="h-4 w-20 rounded-xs" />
             <Skeleton className="h-3 w-1 rounded-full" />
             <Skeleton className="h-4 w-36 rounded-xs" />
           </div>
-
-          {/* Title */}
           <div className="flex flex-col gap-2 items-center md:items-start">
             <Skeleton className="h-8 md:h-12 w-full rounded-sm" />
             <Skeleton className="h-8 md:h-12 w-11/12 rounded-sm" />
             <Skeleton className="h-8 md:h-12 w-3/4 rounded-sm" />
           </div>
-
-          {/* Share Section (Bagikan: icons) */}
           <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 -mt-2">
             <Skeleton className="h-4 w-16 rounded-xs" />
             <div className="flex items-center gap-2">
@@ -98,33 +515,24 @@ export default function ArticleDetailView({
               ))}
             </div>
           </div>
-
-          {/* Author & Read Time Info */}
           <div className="flex flex-nowrap items-center justify-center md:justify-start gap-x-4 md:gap-x-6 py-3 border-y border-slate-200/60 dark:border-slate-800/60">
             <Skeleton className="h-4 w-32 rounded-xs" />
             <Skeleton className="h-4 w-28 rounded-xs" />
             <Skeleton className="h-4 w-24 rounded-xs" />
           </div>
-
-          {/* Article Image (16:9 aspect) */}
           <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] border border-slate-200 dark:border-slate-800">
             <Skeleton className="w-full h-full rounded-[5px]" />
           </div>
-          {/* Photo Caption */}
           <div className="-mt-3.5 flex justify-between px-1">
             <Skeleton className="h-3 w-36 rounded-xs" />
             <Skeleton className="h-3 w-24 rounded-xs" />
           </div>
-
-          {/* Toolbar (TTS + Font Sizer) */}
           <div className="flex flex-col gap-3.5 py-3.5 border-y border-slate-200/60 dark:border-slate-800/60">
             <div className="flex items-center justify-between gap-4 w-full">
               <Skeleton className="h-8 w-40 rounded-full" />
               <Skeleton className="h-8 w-28 rounded-lg" />
             </div>
           </div>
-
-          {/* Content Paragraphs */}
           <div className="flex flex-col gap-3 py-4">
             <Skeleton className="h-4 w-full rounded-sm" />
             <Skeleton className="h-4 w-full rounded-sm" />
@@ -144,559 +552,6 @@ export default function ArticleDetailView({
     );
   }
 
-  const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const [isAudioActive, setIsAudioActive] = useState(false);
-  const [speechProgress, setSpeechProgress] = useState(0); // in seconds
-  const [speechDuration, setSpeechDuration] = useState(() => 
-    calculateSpeechDuration(article?.title, article?.author, article?.content)
-  );
-  const [playbackRate, setPlaybackRate] = useState<number>(1);
-  const [isDragging, setIsDragging] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  
-  const [liveViews, setLiveViews] = useState<number | null>(null);
-  // Live image URL from CMS polling — updates when redaksi changes thumbnail
-  const [liveImageUrl, setLiveImageUrl] = useState<string>(article?.imageUrl || '');
-  const [fullContent, setFullContent] = useState<string>(() => {
-    if (article?.id && articleContentMemoryCache.has(article.id)) {
-      return articleContentMemoryCache.get(article.id)!;
-    }
-    return article?.content || (article as any)?.isi || article?.summary || article?.subtitle || '';
-  });
-  const [isFetchingDetail, setIsFetchingDetail] = useState<boolean>(() => {
-    if (article?.id && articleContentMemoryCache.has(article.id)) {
-      return false;
-    }
-    const existing = article?.content || (article as any)?.isi || '';
-    return stripHtml(existing).trim().length < 80;
-  });
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-
-  // Initialize duration dynamically based on word count whenever article changes
-  useEffect(() => {
-    if (!article) return;
-    const contentToUse = fullContent || article.content || article.summary || '';
-    const seconds = calculateSpeechDuration(article.title, article.author, contentToUse);
-    setSpeechDuration(seconds);
-    setSpeechProgress(0);
-    setLiveViews(null);
-  }, [article, fullContent]);
-
-  // Silent background pre-generation of TTS audio on article view for instant 0-1s playback
-  useEffect(() => {
-    if (!article?.id) return;
-    const contentToUse = fullContent || article.content || article.summary || '';
-    const textSig = `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
-    if (articleAudioUrlMemoryCache.has(textSig)) return;
-
-    const timer = setTimeout(() => {
-      if (!contentToUse) return;
-
-      fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: article.title || '',
-          author: article.author || 'Redaksi SinPo',
-          text: contentToUse,
-        }),
-      })
-        .then((res) => {
-          if (res.ok) return res.blob();
-          return null;
-        })
-        .then((blob) => {
-          if (blob) {
-            const audioUrl = URL.createObjectURL(blob);
-            articleAudioUrlMemoryCache.set(textSig, audioUrl);
-          }
-        })
-        .catch(() => {});
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [article?.id, fullContent]);
-
-  useEffect(() => {
-    if (!article) return;
-    if (article.id && articleContentMemoryCache.has(article.id)) {
-      const cached = articleContentMemoryCache.get(article.id)!;
-      setFullContent(cached);
-      setIsFetchingDetail(false);
-    } else {
-      const bestContent = article.content || (article as any)?.isi || article.summary || article.subtitle || '';
-      setFullContent(bestContent);
-      const textLen = stripHtml(bestContent).trim().length;
-      setIsFetchingDetail(textLen < 80);
-    }
-  }, [article?.id, article?.content]);
-
-  // Dynamic NewsArticle JSON-LD Structured Data for Google Rich Results
-  useEffect(() => {
-    if (!article) return;
-
-    const cleanTitle = stripHtml(article.title || '');
-    const cleanSummary = stripHtml(article.summary || article.subtitle || article.content || '').slice(0, 200);
-    const currentUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
-    const imageUrl = liveImageUrl || article.imageUrl || 'https://sinpo.id/sinpo-favicon.png';
-
-    const newsArticleSchema = {
-      '@context': 'https://schema.org',
-      '@type': 'NewsArticle',
-      'mainEntityOfPage': {
-        '@type': 'WebPage',
-        '@id': currentUrl,
-      },
-      'headline': cleanTitle,
-      'description': cleanSummary,
-      'articleSection': (article.category || 'POLITIK').toUpperCase(),
-      'image': [imageUrl],
-      'datePublished': article.date || new Date().toISOString(),
-      'dateModified': article.date || new Date().toISOString(),
-      'author': [
-        {
-          '@type': 'Person',
-          'name': article.author || 'Redaksi SinPo',
-          'jobTitle': 'Jurnalis',
-          'url': 'https://sinpo.id',
-        },
-      ],
-      'publisher': {
-        '@type': 'Organization',
-        'name': 'SinPo.id',
-        'url': 'https://sinpo.id',
-        'logo': {
-          '@type': 'ImageObject',
-          'url': 'https://sinpo.id/sinpo-favicon.png',
-          'width': 512,
-          'height': 512,
-        },
-      },
-      'isAccessibleForFree': true,
-      'inLanguage': 'id-ID',
-    };
-
-    let scriptTag = document.getElementById('newsarticle-jsonld-client') as HTMLScriptElement;
-    if (!scriptTag) {
-      scriptTag = document.createElement('script');
-      scriptTag.id = 'newsarticle-jsonld-client';
-      scriptTag.type = 'application/ld+json';
-      document.head.appendChild(scriptTag);
-    }
-    scriptTag.textContent = JSON.stringify(newsArticleSchema);
-  }, [article]);
-
-  // Article Not Found state (takedown / schedule / 404)
-  const [isArticleNotFound, setIsArticleNotFound] = useState(() => isTakedownArticle(article) || isScheduledArticle(article));
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Multi-Image Gallery Slider states
-  const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => article?.galleryImages || []);
-  const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
-
-  const prevArticleIdRef = useRef<string | null>(article?.id || null);
-
-  useEffect(() => {
-    const isSameArticle = prevArticleIdRef.current === article?.id;
-    prevArticleIdRef.current = article?.id || null;
-
-    if (isSameArticle) {
-      setLiveImageUrl((prev) => pickNewerImageUrl(prev, article?.imageUrl));
-    } else {
-      setLiveImageUrl(article?.imageUrl || '');
-    }
-    setLiveGalleryImages(article?.galleryImages || []);
-    setActiveImageIndex(0);
-    setIsArticleNotFound(isTakedownArticle(article) || isScheduledArticle(article));
-  }, [article]);
-
-  const allGalleryImages = React.useMemo(() => {
-    const category = (article?.category || '').toUpperCase().trim();
-    const isGalleryCategory = category === 'GALERI' || category === 'FOTO';
-
-    // If this article is NOT from GALERI/FOTO category and has no explicit gallery images, ALWAYS treat as single-image article
-    if (!isGalleryCategory && (!article?.galleryImages || article.galleryImages.length === 0)) {
-      const currentImg = liveImageUrl || article?.imageUrl;
-      return currentImg ? [currentImg] : [];
-    }
-
-    const list: string[] = [];
-    const mainImg = liveImageUrl || article?.imageUrl;
-    if (mainImg && !mainImg.includes('placehold.co')) {
-      list.push(mainImg);
-    }
-    (liveGalleryImages || []).forEach((imgUrl) => {
-      if (imgUrl && !list.includes(imgUrl)) {
-        list.push(imgUrl);
-      }
-    });
-    return list;
-  }, [article?.id, article?.category, article?.imageUrl, article?.galleryImages, liveGalleryImages, liveImageUrl]);
-
-  const [showCopyTooltip, setShowCopyTooltip] = useState(false);
-  const handleCopyLink = () => {
-    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
-    navigator.clipboard.writeText(targetUrl).then(() => {
-      setShowCopyTooltip(true);
-      setTimeout(() => setShowCopyTooltip(false), 2000);
-    }).catch(() => {});
-  };
-
-  const handleNativeShare = async () => {
-    if (!article) return;
-    const targetUrl = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
-    const shareData = {
-      title: stripHtml(article.title),
-      text: stripHtml(article.summary || article.subtitle || article.title),
-      url: targetUrl,
-    };
-
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch (err: any) {
-        if (err?.name !== 'AbortError') {
-          handleCopyLink();
-        }
-      }
-    } else {
-      handleCopyLink();
-    }
-  };
-
-  // Helper: extract view count from raw API data
-  const extractViewCount = (data: any): number => {
-    if (typeof data.counter === 'number') return data.counter;
-    if (typeof data.dilihat === 'number') return data.dilihat;
-    if (typeof data.views === 'number') return data.views;
-    return parseInt(data.counter || data.dilihat || data.views || '0', 10) || 0;
-  };
-
-  // Initial fetch + 30s real-time polling (matching sinpo 2 startArticlePolling)
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'auto' });
-    let isMounted = true;
-
-    // Immediately block scheduled / takedown articles without incrementing counter
-    if (isTakedownArticle(article) || isScheduledArticle(article)) {
-      setIsArticleNotFound(true);
-      return;
-    }
-
-    setIsArticleNotFound(false);
-
-    const rawId = article.id.replace('laravel-', '');
-    const numericId = getNumericId(article.id) || rawId;
-    const targetIdOrSlug = numericId || (article as any).slug || rawId;
-
-    let hasIncrementedCounter = false;
-
-    // Core fetch function — used for initial load and polling
-    async function fetchArticleDetail(isInitial: boolean = false) {
-      try {
-        const res = await apiFetch(`/berita/${targetIdOrSlug}`);
-        if (!isMounted) return;
-
-        if (res && res.data) {
-          const detailData = res.data as any;
-
-          // Check takedown / scheduled status from raw API data
-          if (isTakedownArticle(detailData) || isScheduledArticle(detailData)) {
-            setIsArticleNotFound(true);
-            return;
-          }
-
-          // Article is valid and live!
-          setIsArticleNotFound(false);
-
-          // Trigger view counter increment ONLY for valid, live published articles (once per mount)
-          if (isInitial && !hasIncrementedCounter) {
-            hasIncrementedCounter = true;
-            incrementArticleViewCounter(article.id).then((newCount) => {
-              if (isMounted && newCount && newCount > 0) {
-                setLiveViews((prev) => Math.max(prev ?? 0, newCount));
-              }
-            });
-          }
-
-          // 1. View counter — always take the highest value (matching sinpo 2 logic)
-          const fetchedCount = extractViewCount(detailData);
-          setLiveViews(prev => {
-            const currentMax = Math.max(prev ?? 0, article.views ?? 0, article.dilihat ?? 0);
-            return Math.max(currentMax, fetchedCount);
-          });
-
-          // 2. Content / Isi — live edit sync & memory caching
-          const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
-          if (fetchedContent) {
-            if (article?.id) {
-              articleContentMemoryCache.set(article.id, fetchedContent);
-            }
-            setFullContent(fetchedContent);
-            setIsFetchingDetail(false);
-          }
-
-          // 3. Title — live edit sync (only on polling, not initial)
-          if (!isInitial && detailData.judul && detailData.judul !== article.title) {
-            // Update document title for SEO
-            document.title = `${stripHtml(detailData.judul)} - SinPo.id`;
-          }
-
-          // 4. Image URL — live edit sync (update when CMS thumbnail changes)
-          // NOTE: The listing API (/berita?limit=100) often returns a NEWER gambar_detail
-          // than the detail API (/berita/{id}). So we must NOT blindly overwrite the
-          // initial imageUrl (from listing) with potentially stale detail API data.
-          // Only update if: (a) we had no initial image, or (b) the detail API image
-          // has a newer timestamp embedded in its filename (DDMMYYYY-HHMMSS pattern).
-          const latestRawImage = detailData.gambar_detail || detailData.gambar || detailData.image || detailData.cover || detailData.thumbnail || detailData.foto || '';
-          if (latestRawImage) {
-            const latestImageUrl = getStorageUrl(latestRawImage);
-            setLiveImageUrl((prev) => pickNewerImageUrl(prev, latestImageUrl));
-          }
-
-          // 4. Sync live gallery images array
-          const rawGal = detailData.datagallery || detailData.datagambar || detailData.galeri || detailData.images || [];
-          if (Array.isArray(rawGal) && rawGal.length > 0) {
-            const parsedGal = rawGal.map((g: any) => {
-              if (typeof g === 'string') return getStorageUrl(g);
-              const photoPath = g.nama_photo || g.foto || g.gambar || g.photo || g.url || g.image || '';
-              return getStorageUrl(photoPath);
-            }).filter(Boolean);
-            if (parsedGal.length > 0) {
-              setLiveGalleryImages(parsedGal);
-            } else {
-              setLiveGalleryImages(article?.galleryImages || []);
-            }
-          } else {
-            setLiveGalleryImages(article?.galleryImages || []);
-          }
-        }
-      } catch (err: any) {
-        if (!isMounted) return;
-        // Do NOT flip a valid rendered article to 404 on transient background polling network errors!
-        // Only trigger 404 if article has no valid title AND is taken down
-        if ((!article?.title || isTakedownArticle(article)) && (err?.status === 404 || err?.isNotFound)) {
-          setIsArticleNotFound(true);
-        }
-      } finally {
-        if (isMounted && isInitial) {
-          setIsFetchingDetail(false);
-        }
-      }
-    }
-
-    // Initial fetch (triggers view count increment on API backend ONLY if article is live)
-    fetchArticleDetail(true);
-
-    // 30-second real-time polling (matching sinpo 2 articlePollingInterval = 30000)
-    pollingRef.current = setInterval(() => {
-      fetchArticleDetail(false);
-    }, 30000);
-
-    // Tab visibility listener — immediate refetch when tab becomes visible
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible' && isMounted) {
-        fetchArticleDetail(false);
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      isMounted = false;
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [article.id, (article as any).slug]);
-
-  // Clean up audio when article changes or component unmounts
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  }, [article?.id]);
-
-  // Handle OpenVoice / Edge-Neural Text-to-Speech audio synthesis & instant playback
-  const toggleSpeech = async () => {
-    if (!article || isLoadingAudio) return;
-
-    // 1. Toggle pause/play if audio element already exists
-    if (audioRef.current && audioRef.current.src) {
-      if (isSpeaking) {
-        audioRef.current.pause();
-        setIsSpeaking(false);
-      } else {
-        if (audioRef.current.ended || audioRef.current.currentTime >= audioRef.current.duration) {
-          audioRef.current.currentTime = 0;
-        }
-        audioRef.current.play().catch(() => {});
-        setIsSpeaking(true);
-      }
-      return;
-    }
-
-    try {
-      // Ensure any previous audio is completely stopped
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-
-      setIsAudioActive(true);
-      setIsLoadingAudio(true);
-      setIsSpeaking(false);
-
-      // Instantiate Audio element synchronously inside user click gesture handler
-      const audio = new Audio();
-      audio.playbackRate = playbackRate;
-      audioRef.current = audio;
-
-      const contentToUse = fullContent || article.content || article.summary || '';
-      const textSig = article.id ? `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}` : '';
-      let audioUrl = textSig ? articleAudioUrlMemoryCache.get(textSig) : undefined;
-
-      // 2. Fetch OpenVoice Neural Audio from /api/tts if not in memory cache
-      if (!audioUrl) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 50000); // 50s timeout for full articles
-
-        try {
-          const res = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: article.title || '',
-              author: article.author || 'Redaksi SinPo',
-              text: contentToUse,
-              category: article.category || ''
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (res.ok) {
-            const blob = await res.blob();
-            audioUrl = URL.createObjectURL(blob);
-            if (textSig) {
-              articleAudioUrlMemoryCache.set(textSig, audioUrl);
-            }
-          } else {
-            throw new Error('Gagal memuat audio penyiar berita');
-          }
-        } catch (fetchErr: any) {
-          clearTimeout(timeoutId);
-          console.warn('TTS Fetch Warning:', fetchErr?.message || fetchErr);
-          setIsLoadingAudio(false);
-          setIsSpeaking(false);
-          setIsAudioActive(false);
-          onShare('Gagal memuat audio penyiar berita.');
-          return;
-        }
-      }
-
-      // 3. Play authentic OpenVoice (id-ID-ArdiNeural) audio file
-      if (audioUrl && audioRef.current === audio) {
-        audio.src = audioUrl;
-
-        audio.onloadedmetadata = () => {
-          if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-            setSpeechDuration(audio.duration);
-          }
-        };
-
-        // Use durationchange as backup in case loadedmetadata fires before duration is ready
-        audio.ondurationchange = () => {
-          if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-            setSpeechDuration(audio.duration);
-          }
-        };
-
-        audio.ontimeupdate = () => {
-          if (!isDragging) {
-            setSpeechProgress(audio.currentTime);
-          }
-        };
-
-        audio.onended = () => {
-          setIsSpeaking(false);
-        };
-
-        audio.onerror = () => {
-          setIsSpeaking(false);
-          setIsLoadingAudio(false);
-          setIsAudioActive(false);
-          onShare('Gagal memutar audio berita.');
-        };
-
-        try {
-          await audio.play();
-          setIsSpeaking(true);
-          setIsLoadingAudio(false);
-        } catch (playErr) {
-          console.warn('Audio play policy handled:', playErr);
-          setIsSpeaking(true);
-          setIsLoadingAudio(false);
-        }
-      }
-    } catch (e: any) {
-      console.error('TTS Error:', e);
-      setIsSpeaking(false);
-      setIsLoadingAudio(false);
-      onShare('Gagal memuat audio berita.');
-    }
-  };
-
-  const stopSpeech = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-    setIsSpeaking(false);
-    setIsLoadingAudio(false);
-    setIsAudioActive(false);
-    setSpeechProgress(0);
-  };
-
-  const handleSpeedChange = (speed: number) => {
-    setPlaybackRate(speed);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = speed;
-    }
-  };
-
-  const handleSeek = (newSeconds: number) => {
-    setSpeechProgress(newSeconds);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newSeconds;
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  const isBookmarked = (bookmarkedIds || []).includes(article?.id || '');
-
-  const handleShareClick = () => {
-    if (!article) return;
-    const url = typeof window !== 'undefined' ? window.location.href : `https://sinpo.id${getArticleUrl(article)}`;
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(url).catch(() => {});
-    }
-    onShare("Tautan artikel berhasil disalin ke papan klip!");
-  };
-
-  // If article was detected as takedown / scheduled / deleted during polling
   if (isArticleNotFound) {
     return (
       <NotFoundView
@@ -709,49 +564,37 @@ export default function ArticleDetailView({
 
   return (
     <article className="w-full flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      
-      {/* Main Core Content */}
       <div className="flex flex-col gap-6">
         
-        {/* Category & Date Badge */}
         <div className="flex items-center justify-center md:justify-start gap-2">
           <button
-            onClick={() => {
-              if (onSelectCategory) {
-                onSelectCategory(article.category.toUpperCase());
-                onBack();
-              }
-            }}
+            onClick={() => { if (onSelectCategory) { onSelectCategory(localArticle.category.toUpperCase()); onBack(); } }}
             className="text-brand-red-600 dark:text-white font-sans text-[10px] font-bold tracking-wider uppercase hover:underline cursor-pointer active:scale-95 transition-transform focus:outline-none"
-            title={`Lihat semua berita kategori ${article.category}`}
+            title={`Lihat semua berita kategori ${localArticle.category}`}
           >
-            {article.category}
+            {localArticle.category}
           </button>
           <span className="text-slate-400 text-xs font-sans">•</span>
           <span className="text-slate-500 dark:text-slate-400 text-xs font-sans flex items-center gap-1">
-            <Calendar className="h-3.5 w-3.5" /> {article.date}
+            <Calendar className="h-3.5 w-3.5" /> {localArticle.date}
           </span>
         </div>
 
-        {/* Title */}
         <h1 className="font-sans text-3xl md:text-5xl font-extrabold tracking-tight leading-tight text-slate-950 dark:text-white text-center md:text-left">
-          {article.title}
+          {localArticle.title}
         </h1>
 
-        {/* Subtitle / Ringkasan (HANYA jika ada ringkasan/sub-judul asli dari API) */}
-        {article.subtitle && stripHtml(article.subtitle).trim().length > 0 && stripHtml(article.subtitle).trim() !== article.title && (
+        {localArticle.subtitle && stripHtml(localArticle.subtitle).trim().length > 0 && stripHtml(localArticle.subtitle).trim() !== localArticle.title && (
           <p className="font-sans text-sm md:text-base text-slate-600 dark:text-slate-300 leading-relaxed font-normal italic text-center md:text-left">
-            {stripHtml(article.subtitle)}
+            {stripHtml(localArticle.subtitle)}
           </p>
         )}
 
-        {/* Share Section (BAGIKAN : 3 Horizontal Dots Circle Button + Chain Copy Link Button) */}
         <div className="flex items-center justify-center md:justify-start gap-2.5 -mt-2">
           <span className="font-sans text-[11px] font-bold tracking-wide text-slate-400 dark:text-slate-500 uppercase select-none">
             BAGIKAN :
           </span>
           <div className="flex items-center gap-2">
-            {/* Native Web Share API Button (iOS/iPhone Share Icon) */}
             <button
               onClick={handleNativeShare}
               className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-600 dark:text-slate-300 transition-all flex items-center justify-center cursor-pointer active:scale-95"
@@ -759,8 +602,6 @@ export default function ArticleDetailView({
             >
               <Share className="h-4 w-4" />
             </button>
-
-            {/* Chain Icon for Copy Link with "link copied" Tooltip */}
             <div className="relative inline-flex items-center">
               <button
                 onClick={handleCopyLink}
@@ -769,8 +610,6 @@ export default function ArticleDetailView({
               >
                 <Link className="h-4 w-4" />
               </button>
-
-              {/* Temporary Tooltip */}
               {showCopyTooltip && (
                 <div className="absolute -top-9 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-[11px] font-medium font-sans px-2.5 py-1 rounded shadow-md whitespace-nowrap animate-fade-in pointer-events-none z-30 flex items-center gap-1">
                   <span>link copied</span>
@@ -781,34 +620,26 @@ export default function ArticleDetailView({
           </div>
         </div>
 
-        {/* Author & Read Time Info */}
         <div className="w-full flex flex-nowrap items-center justify-start gap-3 sm:gap-4 md:gap-6 py-3 px-0.5 border-y border-slate-200/60 dark:border-slate-800/60 text-xs sm:text-xs md:text-sm text-slate-500 dark:text-slate-400 font-sans overflow-x-auto no-scrollbar whitespace-nowrap">
           <span className="flex items-center gap-1.5 shrink-0">
-            <User className="h-4 w-4 text-brand-red-600 shrink-0" /> Wartawan: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{article.author}</strong>
+            <User className="h-4 w-4 text-brand-red-600 shrink-0" /> Wartawan: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{localArticle.author}</strong>
           </span>
           <span className="text-slate-300 dark:text-slate-700 shrink-0 select-none">•</span>
           <span className="flex items-center gap-1.5 shrink-0">
             <Clock className="h-4 w-4 text-brand-red-600 shrink-0" /> Estimasi: <strong className="ml-0.5 font-bold text-slate-700 dark:text-slate-200">{formatTime(speechDuration)} {speechDuration >= 60 ? 'Menit' : 'Detik'}</strong>
           </span>
-          {/* Dilihat view count hidden */}
         </div>
 
-        {/* Article Image / Multi-Image Slider for GALERI category */}
         {allGalleryImages.length > 1 ? (
           <div className="flex flex-col gap-2.5">
-            {/* Main Interactive Slide Container */}
             <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-900 border border-slate-200 dark:border-slate-800 group select-none">
               <img
-                src={allGalleryImages[activeImageIndex] || article.imageUrl}
-                alt={`${article.title} - Foto ${activeImageIndex + 1}`}
+                src={allGalleryImages[activeImageIndex] || localArticle.imageUrl}
+                alt={`${localArticle.title} - Foto ${activeImageIndex + 1}`}
                 referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
-                }}
+                onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media'; }}
                 className="w-full h-full object-cover transition-all duration-300"
               />
-
-              {/* Prev Button - Hidden on mobile, visible on desktop hover */}
               <button
                 onClick={() => setActiveImageIndex((prev) => (prev > 0 ? prev - 1 : allGalleryImages.length - 1))}
                 className="hidden md:flex absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 cursor-pointer shadow-lg active:scale-95 z-10"
@@ -816,8 +647,6 @@ export default function ArticleDetailView({
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
-
-              {/* Next Button - Hidden on mobile, visible on desktop hover */}
               <button
                 onClick={() => setActiveImageIndex((prev) => (prev < allGalleryImages.length - 1 ? prev + 1 : 0))}
                 className="hidden md:flex absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-brand-red-600 text-white p-2.5 rounded-full backdrop-blur-md opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 cursor-pointer shadow-lg active:scale-95 z-10"
@@ -826,24 +655,16 @@ export default function ArticleDetailView({
                 <ChevronRight className="w-5 h-5" />
               </button>
             </div>
-
-            {/* Thumbnail Navigation Strip */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1.5 no-scrollbar select-none">
               {allGalleryImages.map((imgUrl, idx) => (
                 <button
                   key={idx}
                   onClick={() => setActiveImageIndex(idx)}
                   className={`relative shrink-0 w-20 h-14 rounded overflow-hidden border-2 transition-all cursor-pointer ${
-                    activeImageIndex === idx
-                      ? 'border-brand-red-600 ring-2 ring-brand-red-600/30 scale-105 opacity-100'
-                      : 'border-transparent opacity-60 hover:opacity-100'
+                    activeImageIndex === idx ? 'border-brand-red-600 ring-2 ring-brand-red-600/30 scale-105 opacity-100' : 'border-transparent opacity-60 hover:opacity-100'
                   }`}
                 >
-                  <img
-                    src={imgUrl}
-                    alt={`Thumbnail ${idx + 1}`}
-                    className="w-full h-full object-cover"
-                  />
+                  <img src={imgUrl} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>
@@ -851,26 +672,22 @@ export default function ArticleDetailView({
         ) : (
           <div className="relative rounded-[5px] overflow-hidden aspect-[16/9] bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
             <img
-              src={liveImageUrl || article.imageUrl}
-              alt={article.title}
+              src={liveImageUrl || localArticle.imageUrl}
+              alt={localArticle.title}
               referrerPolicy="no-referrer"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media';
-              }}
+              onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/800x600/1e293b/ffffff?text=SinPo+Media'; }}
               className="w-full h-full object-cover rounded-[5px]"
             />
           </div>
         )}
 
         <div className="-mt-3.5 text-xs text-slate-400 dark:text-slate-500 italic font-sans px-1">
-          <span>{article.caption ? `Foto ${allGalleryImages.length > 1 ? `${activeImageIndex + 1}/${allGalleryImages.length}` : ''}: ${article.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
+          <span>{localArticle.caption ? `Foto ${allGalleryImages.length > 1 ? `${activeImageIndex + 1}/${allGalleryImages.length}` : ''}: ${localArticle.caption}` : 'Foto: Dok. Istimewa / Ilustrasi'}</span>
         </div>
 
-        {/* Dynamic Toolbars (TTS, Bookmark, Share, Font Size) & Progress Player Block - Placed after Image */}
         <div className="flex flex-col gap-3.5 py-3.5 border-y border-slate-200/60 dark:border-slate-800/60">
           <div className="flex items-center justify-between gap-1.5 sm:gap-4 w-full">
             <div className="flex items-center gap-1.5 sm:gap-3">
-              {/* TTS Audio Reader & Executed Controls */}
               {!isAudioActive ? (
                 <button
                   onClick={toggleSpeech}
@@ -882,7 +699,6 @@ export default function ArticleDetailView({
                 </button>
               ) : (
                 <div className="flex items-center gap-2 font-sans">
-                  {/* Stop Button (Icon silang, bg transparant, border circle) */}
                   <button
                     onClick={stopSpeech}
                     className="p-1.5 rounded-full bg-transparent border border-slate-300 dark:border-slate-700 hover:border-brand-red-600 hover:text-brand-red-600 dark:hover:border-brand-red-500 dark:hover:text-brand-red-400 text-slate-600 dark:text-slate-400 transition-all cursor-pointer"
@@ -890,38 +706,23 @@ export default function ArticleDetailView({
                   >
                     <X className="h-4 w-4" />
                   </button>
-
-                  {/* Pause/Continue Button (Icon pause/continue, bg transparant, border circle) */}
                   <button
                     onClick={toggleSpeech}
                     disabled={isLoadingAudio}
                     className="p-1.5 rounded-full bg-transparent border border-slate-300 dark:border-slate-700 hover:border-brand-red-600 hover:text-brand-red-600 dark:hover:border-brand-red-500 dark:hover:text-brand-red-400 text-slate-600 dark:text-slate-400 transition-all cursor-pointer disabled:opacity-50"
                     title={isLoadingAudio ? "Memproses audio..." : isSpeaking ? "Jeda (Pause)" : "Lanjutkan (Continue)"}
                   >
-                    {isLoadingAudio ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-brand-red-600" />
-                    ) : isSpeaking ? (
-                      <Pause className="h-4 w-4" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
+                    {isLoadingAudio ? <Loader2 className="h-4 w-4 animate-spin text-brand-red-600" /> : isSpeaking ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </button>
-
-                  {/* Separator */}
                   <span className="text-slate-300 dark:text-slate-700 select-none font-light">|</span>
-
-                  {/* Speed Controls: 1x >>, 2x >>, 3x >> */}
                   <div className="flex items-center gap-1">
                     {[1, 2, 3].map((speed) => (
                       <button
                         key={speed}
                         onClick={() => handleSpeedChange(speed)}
                         className={`px-2 py-0.5 rounded border text-[11px] font-sans font-semibold bg-transparent transition-all cursor-pointer ${
-                          playbackRate === speed
-                            ? 'border-brand-red-600 text-brand-red-600 dark:border-brand-red-500 dark:text-brand-red-400 font-bold shadow-xs'
-                            : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-600'
+                          playbackRate === speed ? 'border-brand-red-600 text-brand-red-600 dark:border-brand-red-500 dark:text-brand-red-400 font-bold shadow-xs' : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:hover:border-slate-600'
                         }`}
-                        title={`Kecepatan ${speed}x`}
                       >
                         {speed}x &raquo;
                       </button>
@@ -930,37 +731,16 @@ export default function ArticleDetailView({
                 </div>
               )}
             </div>
-
-            {/* Font Sizer */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-0.5 min-[375px]:p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] min-[375px]:text-xs font-sans shrink-0">
               <span className="hidden min-[350px]:inline-block text-[8px] min-[375px]:text-[9px] text-slate-400 uppercase tracking-wider px-1.5 min-[375px]:px-2 font-semibold select-none">HURUF</span>
-              <button
-                onClick={() => setFontSize('sm')}
-                className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-              >
-                A-
-              </button>
-              <button
-                onClick={() => setFontSize('base')}
-                className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-              >
-                A
-              </button>
-              <button
-                onClick={() => setFontSize('lg')}
-                className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-              >
-                A+
-              </button>
+              <button onClick={() => setFontSize('sm')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A-</button>
+              <button onClick={() => setFontSize('base')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A</button>
+              <button onClick={() => setFontSize('lg')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A+</button>
             </div>
           </div>
-
-          {/* Progress Slider (Visible when audio is active) */}
           {isAudioActive && (
             <div className="flex items-center gap-4 w-full pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
-              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-right select-none">
-                {formatTime(speechProgress)}
-              </span>
+              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-right select-none">{formatTime(speechProgress)}</span>
               <input
                 type="range"
                 min={0}
@@ -971,73 +751,43 @@ export default function ArticleDetailView({
                 onMouseDown={() => setIsDragging(true)}
                 onTouchStart={() => setIsDragging(true)}
                 onChange={(e) => setSpeechProgress(Number(e.target.value))}
-                onMouseUp={(e) => {
-                  setIsDragging(false);
-                  handleSeek(Number((e.target as HTMLInputElement).value));
-                }}
-                onTouchEnd={(e) => {
-                  setIsDragging(false);
-                  handleSeek(Number((e.target as HTMLInputElement).value));
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                    setIsDragging(true);
-                  }
-                }}
-                onKeyUp={(e) => {
-                  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                    setIsDragging(false);
-                    handleSeek(speechProgress);
-                  }
-                }}
+                onMouseUp={(e) => { setIsDragging(false); handleSeek(Number((e.target as HTMLInputElement).value)); }}
+                onTouchEnd={(e) => { setIsDragging(false); handleSeek(Number((e.target as HTMLInputElement).value)); }}
+                onKeyDown={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') setIsDragging(true); }}
+                onKeyUp={(e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { setIsDragging(false); handleSeek(speechProgress); } }}
                 className={`flex-1 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-red-600 dark:accent-brand-red-500 focus:outline-none ${isLoadingAudio ? 'opacity-50' : ''}`}
               />
-              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-left select-none">
-                {formatTime(speechDuration)}
-              </span>
+              <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0 w-10 text-left select-none">{formatTime(speechDuration)}</span>
             </div>
           )}
         </div>
 
-        {/* Interactive Audio Warning for Indonesian Readers */}
         {isSpeaking && (
           <div className="bg-brand-red-50 dark:bg-brand-red-950/20 border border-brand-red-200 dark:border-brand-red-950 rounded-lg p-3.5 flex items-center gap-3">
             <span className="h-2 w-2 rounded-full bg-brand-red-600 animate-ping shrink-0" />
-            <p className="text-xs font-sans text-brand-red-800 dark:text-brand-red-400">
-              Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk membaca artikel.
-            </p>
+            <p className="text-xs font-sans text-brand-red-800 dark:text-brand-red-400">Sistem sedang membaca berita secara audio dalam bahasa Indonesia... Anda dapat memperbesar teks atau menggulir untuk membaca artikel.</p>
           </div>
         )}
 
-        {/* Relative content wrapper to control the boundary of the sticky bottom-right share button */}
         <div className="relative flex flex-col gap-6 pb-12 md:pb-0">
-          {/* Article Paragraph Content - Rendered Instantly & Completely at 0ms */}
           <div className="flex flex-col gap-4">
             <div
               className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 transition-all duration-300 ${
-                fontSize === 'sm'
-                  ? "text-sm"
-                  : fontSize === 'base'
-                    ? "text-base"
-                    : "text-lg md:text-xl"
+                fontSize === 'sm' ? "text-sm" : fontSize === 'base' ? "text-base" : "text-lg md:text-xl"
               }`}
-              dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || buildInitialContent(article)) }}
+              dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || buildInitialContent(localArticle)) }}
             />
           </div>
-
-          {/* Article Tags */}
           <div className="flex flex-wrap items-center gap-2 pt-4 border-b border-slate-100 dark:border-slate-900/40 pb-4">
             <span className="font-sans text-xs font-bold text-slate-600 dark:text-slate-400 mr-1">Tags:</span>
-            {article.tags.map((tag) => (
+            {(localArticle.tags || []).map((tag) => (
               <a
                 key={tag}
                 href={getTagUrl(tag)}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
-                  if (onSelectTag) {
-                    onSelectTag(tag);
-                  }
+                  if (onSelectTag) onSelectTag(tag);
                 }}
                 className="font-sans text-[10px] font-bold text-slate-500 hover:text-brand-red-600 dark:text-slate-400 dark:hover:text-red-500 bg-slate-100 hover:bg-slate-200/80 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800/80 px-2.5 py-1 rounded transition-all cursor-pointer active:scale-95 inline-block"
               >
@@ -1045,59 +795,38 @@ export default function ArticleDetailView({
               </a>
             ))}
           </div>
-
-
         </div>
 
-        {/* BERITA TERKAIT Section (Tag-matched & Relevant articles, total 6 items) */}
         {(() => {
           if (!articles || articles.length === 0) return null;
-
-          const currentTags = (article.tags || []).map((t) => t.toLowerCase().trim());
-
-          // 1. Find articles sharing at least one common tag with the current article
+          const currentTags = (localArticle.tags || []).map((t) => t.toLowerCase().trim());
           const tagMatchedArticles = articles.filter((art) => {
-            if (art.id === article.id) return false;
+            if (art.id === localArticle.id) return false;
             const artTags = (art.tags || []).map((t) => t.toLowerCase().trim());
             return currentTags.some((tag) => artTags.includes(tag));
           });
-
-          // Sort tag-matched articles newest first
-          tagMatchedArticles.sort(
-            (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
-          );
+          tagMatchedArticles.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
 
           const finalRelated: Article[] = [...tagMatchedArticles];
-
-          // 2. If tag-matched articles are less than 6, fill up with same-category articles
           if (finalRelated.length < 6) {
             const categoryArticles = articles.filter((art) => {
-              if (art.id === article.id) return false;
+              if (art.id === localArticle.id) return false;
               if (finalRelated.some((r) => r.id === art.id)) return false;
-              return art.category.toUpperCase() === article.category.toUpperCase();
+              return art.category.toUpperCase() === localArticle.category.toUpperCase();
             });
-
-            categoryArticles.sort(
-              (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
-            );
-
+            categoryArticles.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
             for (const catArt of categoryArticles) {
               if (finalRelated.length >= 6) break;
               finalRelated.push(catArt);
             }
           }
 
-          // 3. If still less than 6, fill up with remaining latest articles
           if (finalRelated.length < 6) {
             const fallbackArticles = articles.filter((art) => {
-              if (art.id === article.id) return false;
+              if (art.id === localArticle.id) return false;
               return !finalRelated.some((r) => r.id === art.id);
             });
-
-            fallbackArticles.sort(
-              (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
-            );
-
+            fallbackArticles.sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime()));
             for (const fbArt of fallbackArticles) {
               if (finalRelated.length >= 6) break;
               finalRelated.push(fbArt);
@@ -1118,53 +847,24 @@ export default function ArticleDetailView({
                 {fallbackRelated.map((related, idx) => {
                   const isMobileImage = idx % 3 === 0;
                   const isDesktopImage = idx < 2;
-
                   let imageVisibilityClass = "";
-                  if (isMobileImage && isDesktopImage) {
-                    imageVisibilityClass = "block";
-                  } else if (isMobileImage && !isDesktopImage) {
-                    imageVisibilityClass = "block md:hidden";
-                  } else if (!isMobileImage && isDesktopImage) {
-                    imageVisibilityClass = "hidden md:block";
-                  }
-
+                  if (isMobileImage && isDesktopImage) imageVisibilityClass = "block";
+                  else if (isMobileImage && !isDesktopImage) imageVisibilityClass = "block md:hidden";
+                  else if (!isMobileImage && isDesktopImage) imageVisibilityClass = "hidden md:block";
                   const showImageContainer = isMobileImage || isDesktopImage;
 
                   return (
-                    <a
-                      key={related.id}
-                      href={getArticleUrl(related)}
-                      onClick={(e) => {
-                        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
-                        e.preventDefault();
-                        onSelectArticle?.(related);
-                      }}
-                      className="group flex gap-3.5 py-3.5 bg-transparent border-b border-slate-100 dark:border-slate-900 rounded-none cursor-pointer transition-all text-left"
-                    >
+                    <a key={related.id} href={getArticleUrl(related)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(related); }} className="group flex gap-3.5 py-3.5 bg-transparent border-b border-slate-100 dark:border-slate-900 rounded-none cursor-pointer transition-all text-left">
                       {showImageContainer && related.imageUrl && (
                         <div className={`shrink-0 ${imageVisibilityClass}`}>
-                          <img
-                            src={related.imageUrl}
-                            alt={related.title}
-                            referrerPolicy="no-referrer"
-                            className="w-16 h-16 sm:w-20 sm:h-20 object-cover aspect-square rounded-[4px] border border-slate-100 dark:border-slate-900"
-                          />
+                          <img src={related.imageUrl} alt={related.title} referrerPolicy="no-referrer" className="w-16 h-16 sm:w-20 sm:h-20 object-cover aspect-square rounded-[4px] border border-slate-100 dark:border-slate-900" />
                         </div>
                       )}
                       <div className="flex flex-col justify-between flex-1 min-w-0">
-                        {/* Title */}
-                        <h4 className="font-sans text-xs md:text-sm font-bold leading-snug text-slate-900 dark:text-white group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors line-clamp-3">
-                          {related.title}
-                        </h4>
-
-                        {/* Wartawan on Left, Tanggal on Right */}
+                        <h4 className="font-sans text-xs md:text-sm font-bold leading-snug text-slate-900 dark:text-white group-hover:text-brand-red-600 dark:group-hover:text-red-500 transition-colors line-clamp-3">{related.title}</h4>
                         <div className="flex items-center justify-between mt-2 text-[10px] md:text-xs text-slate-500 dark:text-slate-400 font-sans shrink-0">
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[50%]">
-                            {related.author}
-                          </span>
-                          <span className="shrink-0 text-right">
-                            {related.date}
-                          </span>
+                          <span className="font-semibold text-slate-700 dark:text-slate-300 truncate max-w-[50%]">{related.author}</span>
+                          <span className="shrink-0 text-right">{related.date}</span>
                         </div>
                       </div>
                     </a>
@@ -1175,16 +875,8 @@ export default function ArticleDetailView({
           );
         })()}
 
-        {/* BERITA TERKINI Section (Strictly newest to oldest across mixed categories, total 7 items) */}
         {(() => {
-          const latestArticles = articles
-            ? [...articles]
-                .filter((art) => art.id !== article.id)
-                .sort(
-                  (a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())
-                )
-                .slice(0, 7)
-            : [];
+          const latestArticles = articles ? [...articles].filter((art) => art.id !== localArticle.id).sort((a, b) => (b.publishedAtMs || parseAnyDate(b.date).getTime()) - (a.publishedAtMs || parseAnyDate(a.date).getTime())).slice(0, 7) : [];
           if (latestArticles.length === 0) return null;
           return (
             <div className="mt-8 pt-2">
@@ -1195,48 +887,17 @@ export default function ArticleDetailView({
               </div>
               <div className="flex flex-col">
                 {latestArticles.map((latest) => (
-                  <a
-                    key={latest.id}
-                    id={`article-detail-latest-card-${latest.id}`}
-                    href={getArticleUrl(latest)}
-                    onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
-                      e.preventDefault();
-                      onSelectArticle?.(latest);
-                    }}
-                    className="group flex flex-row gap-4 py-4 border-b border-slate-100 dark:border-slate-900/40 cursor-pointer bg-transparent last:border-b-0"
-                  >
-                    {/* Left Side: Image */}
+                  <a key={latest.id} href={getArticleUrl(latest)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(latest); }} className="group flex flex-row gap-4 py-4 border-b border-slate-100 dark:border-slate-900/40 cursor-pointer bg-transparent last:border-b-0">
                     <div className="relative w-24 h-16 md:w-36 md:h-24 shrink-0 overflow-hidden rounded-[5px] bg-slate-100 dark:bg-slate-900">
-                      <img
-                        src={latest.imageUrl}
-                        alt={latest.title}
-                        referrerPolicy="no-referrer"
-                        className="h-full w-full object-cover"
-                      />
+                      <img src={latest.imageUrl} alt={latest.title} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                     </div>
-
-                    {/* Right Side: Category, Title, Author & Date */}
                     <div className="flex flex-col flex-1 min-w-0 justify-between py-0.5">
-                      {/* Category */}
-                      <span className="text-[10px] font-sans font-black uppercase tracking-wider text-brand-red-600">
-                        {latest.category}
-                      </span>
-
-                      {/* Title */}
-                      <h4 className="font-sans text-xs md:text-sm font-bold leading-snug text-slate-900 dark:text-white group-hover:text-brand-red-600 transition-colors line-clamp-2 my-auto py-0.5">
-                        {latest.title}
-                      </h4>
-
-                      {/* Wartawan (Author) & Tanggal (Date) */}
+                      <span className="text-[10px] font-sans font-black uppercase tracking-wider text-brand-red-600">{latest.category}</span>
+                      <h4 className="font-sans text-xs md:text-sm font-bold leading-snug text-slate-900 dark:text-white group-hover:text-brand-red-600 transition-colors line-clamp-2 my-auto py-0.5">{latest.title}</h4>
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] md:text-xs text-slate-500 dark:text-slate-400 font-sans">
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">
-                          {latest.author}
-                        </span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">{latest.author}</span>
                         <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">•</span>
-                        <span>
-                          {latest.date}
-                        </span>
+                        <span>{latest.date}</span>
                       </div>
                     </div>
                   </a>
@@ -1246,29 +907,22 @@ export default function ArticleDetailView({
           );
         })()}
 
-        {/* Comments Block */}
-        {article.comments && article.comments.length > 0 && (
+        {localArticle.comments && localArticle.comments.length > 0 && (
           <section id="article-comments-block" className="mt-8 border-t border-slate-200 dark:border-slate-800 pt-8">
             <div className="flex items-center gap-2 mb-6">
               <h3 className="font-sans text-base font-bold tracking-wider uppercase text-slate-950 dark:text-white">
-                Kolom Opini Publik ({article.comments.length})
+                Kolom Opini Publik ({localArticle.comments.length})
               </h3>
             </div>
-
             <div className="flex flex-col gap-4">
-              {article.comments.map((c) => (
+              {localArticle.comments.map((c) => (
                 <div key={c.id} className="p-4 rounded-[5px] bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/40 dark:border-slate-800/40 flex flex-col gap-1.5 font-sans">
                   <div className="flex items-center justify-between">
                     <strong className="text-xs text-slate-800 dark:text-slate-200">{c.name}</strong>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400 font-sans">{c.date}</span>
                       {myCommentIds?.includes(c.id) && onDeleteComment && (
-                        <button
-                          type="button"
-                          onClick={() => onDeleteComment(article.id, c.id)}
-                          className="p-1 text-slate-400 hover:text-brand-red-600 dark:hover:text-red-500 rounded-[5px] hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors"
-                          title="Hapus tanggapan Anda"
-                        >
+                        <button type="button" onClick={() => onDeleteComment(localArticle.id, c.id)} className="p-1 text-slate-400 hover:text-brand-red-600 dark:hover:text-red-500 rounded-[5px] hover:bg-slate-200 dark:hover:bg-slate-800 cursor-pointer transition-colors" title="Hapus tanggapan Anda">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       )}
@@ -1282,7 +936,6 @@ export default function ArticleDetailView({
         )}
 
       </div>
-
     </article>
   );
 }
