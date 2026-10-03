@@ -16,7 +16,7 @@ import Skeleton from './components/skeletons/Skeleton';
 import Toast from './components/Toast';
 import Logo from './components/Logo';
 import { Article, Comment } from './types';
-import { apiFetch, transformLaravelPostToArticle, isTakedownArticle } from './lib/apiClient';
+import { apiFetch, transformLaravelPostToArticle, isTakedownArticle, pickNewerImageUrl } from './lib/apiClient';
 import { parseAnyDate } from './lib/dateFormatter';
 import { stripHtml } from './lib/htmlRenderer';
 import StaticPageView from './components/StaticPageView';
@@ -1068,7 +1068,15 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
             .then((res) => {
               if (res.success && res.data && !isTakedownArticle(res.data)) {
                 const art = transformLaravelPostToArticle(res.data);
-                setSelectedArticle(art);
+                setSelectedArticle((prev) => {
+                  if (prev && (getNumericId(prev.id) === getNumericId(art.id) || prev.id === art.id)) {
+                    return {
+                      ...art,
+                      imageUrl: pickNewerImageUrl(prev.imageUrl, art.imageUrl),
+                    };
+                  }
+                  return art;
+                });
                 window.scrollTo({ top: 0, behavior: 'auto' });
                 const cleanUrl = getArticleUrl(art);
                 window.history.replaceState({ type: 'article', id: art.id }, '', cleanUrl);
@@ -1174,7 +1182,15 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
         .then((res) => {
           if (res.success && res.data && !isTakedownArticle(res.data)) {
             const art = transformLaravelPostToArticle(res.data);
-            setSelectedArticle(art);
+            setSelectedArticle((prev) => {
+              if (prev && (getNumericId(prev.id) === getNumericId(art.id) || prev.id === art.id)) {
+                return {
+                  ...art,
+                  imageUrl: pickNewerImageUrl(prev.imageUrl, art.imageUrl),
+                };
+              }
+              return art;
+            });
             const cleanUrl = getArticleUrl(art);
             if (window.location.pathname !== cleanUrl) {
               window.history.replaceState({ type: 'article', id: art.id }, '', cleanUrl);

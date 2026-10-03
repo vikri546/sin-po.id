@@ -21,7 +21,7 @@ interface ArticleDetailViewProps {
 }
 
 import { formatArticleHtml, stripHtml } from '../lib/htmlRenderer';
-import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter, getStorageUrl } from '../lib/apiClient';
+import { apiFetch, isTakedownArticle, isScheduledArticle, incrementArticleViewCounter, getStorageUrl, pickNewerImageUrl } from '../lib/apiClient';
 import { parseAnyDate } from '../lib/dateFormatter';
 import NotFoundView from './NotFoundView';
 
@@ -296,8 +296,17 @@ export default function ArticleDetailView({
   const [liveGalleryImages, setLiveGalleryImages] = useState<string[]>(() => article?.galleryImages || []);
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
 
+  const prevArticleIdRef = useRef<string | null>(article?.id || null);
+
   useEffect(() => {
-    setLiveImageUrl(article?.imageUrl || '');
+    const isSameArticle = prevArticleIdRef.current === article?.id;
+    prevArticleIdRef.current = article?.id || null;
+
+    if (isSameArticle) {
+      setLiveImageUrl((prev) => pickNewerImageUrl(prev, article?.imageUrl));
+    } else {
+      setLiveImageUrl(article?.imageUrl || '');
+    }
     setLiveGalleryImages(article?.galleryImages || []);
     setActiveImageIndex(0);
     setIsArticleNotFound(false);
@@ -444,35 +453,7 @@ export default function ArticleDetailView({
           const latestRawImage = detailData.gambar_detail || detailData.gambar || detailData.image || detailData.cover || detailData.thumbnail || detailData.foto || '';
           if (latestRawImage) {
             const latestImageUrl = getStorageUrl(latestRawImage);
-            setLiveImageUrl((prev) => {
-              // If no previous image, always accept the detail API image
-              if (!prev || prev === '' || prev.includes('sinpo-favicon') || prev.includes('sinpo-og-banner')) {
-                return latestImageUrl;
-              }
-              // If the image from detail API is the same as what we already have, keep it
-              if (prev === latestImageUrl) {
-                return prev;
-              }
-              // Images differ: listing vs detail API returned different gambar_detail.
-              // Extract timestamp from filenames to determine which is newer.
-              // Filenames contain pattern: DDMMYYYY-HHMMSS (e.g., 01102026-083332)
-              const extractTimestamp = (url: string): number => {
-                const match = url.match(/(\d{2})(\d{2})(\d{4})-(\d{2})(\d{2})(\d{2})\.\w+$/);
-                if (match) {
-                  const [, dd, mm, yyyy, hh, min, ss] = match;
-                  return new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}`).getTime();
-                }
-                return 0;
-              };
-              const prevTs = extractTimestamp(prev);
-              const newTs = extractTimestamp(latestImageUrl);
-              // Only replace if the detail API image is genuinely newer
-              if (newTs > 0 && prevTs > 0 && newTs > prevTs) {
-                return latestImageUrl;
-              }
-              // Otherwise, keep the current image (from listing — the more up-to-date source)
-              return prev;
-            });
+            setLiveImageUrl((prev) => pickNewerImageUrl(prev, latestImageUrl));
           }
 
           // 4. Sync live gallery images array

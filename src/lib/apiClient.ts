@@ -342,10 +342,47 @@ export function isTakedownArticle(articleOrId: any): boolean {
   return false;
 }
 
-// Manual image overrides for articles where CMS detail API returns outdated image paths
-export const ARTICLE_IMAGE_OVERRIDES: Record<number, string> = {
-  129076: '2026/10/legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-01102026-083332.jpg',
-};
+/**
+ * Extract the upload timestamp embedded in SinPo CMS image filenames.
+ * CMS saves uploads as `<slug>-DDMMYYYY-HHMMSS.jpg` (e.g. `...-01102026-083332.jpg`),
+ * so every re-upload produces a new filename with a newer timestamp.
+ * Returns 0 when the filename has no recognizable timestamp.
+ */
+export function extractImageTimestamp(url?: string | null): number {
+  if (!url || typeof url !== 'string') return 0;
+  const clean = url.split('?')[0];
+  const match = clean.match(/(\d{2})(\d{2})(\d{4})-(\d{2})(\d{2})(\d{2})\.\w+$/);
+  if (!match) return 0;
+  const [, dd, mm, yyyy, hh, min, ss] = match;
+  const month = parseInt(mm, 10);
+  const day = parseInt(dd, 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return 0;
+  const t = new Date(`${yyyy}-${mm}-${dd}T${hh}:${min}:${ss}+07:00`).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+const isPlaceholderImage = (url?: string | null): boolean =>
+  !url || url.includes('placehold.co') || url.includes('sinpo-favicon') || url.includes('sinpo-og-banner');
+
+/**
+ * Automatically decide which image URL to display for the SAME article.
+ * - No current / placeholder image  -> take incoming
+ * - Both filenames carry a timestamp -> take the newer upload (prevents reverting
+ *   to an older image when one CMS endpoint lags behind another)
+ * - Otherwise (no version info)      -> trust the incoming fresh API value
+ * Never call this across different articles.
+ */
+export function pickNewerImageUrl(current?: string | null, incoming?: string | null): string {
+  if (isPlaceholderImage(incoming)) return current || incoming || '';
+  if (isPlaceholderImage(current)) return incoming as string;
+  if (current === incoming) return current as string;
+  const tsCurrent = extractImageTimestamp(current);
+  const tsIncoming = extractImageTimestamp(incoming);
+  if (tsCurrent > 0 && tsIncoming > 0) {
+    return tsIncoming >= tsCurrent ? (incoming as string) : (current as string);
+  }
+  return incoming as string;
+}
 
 /**
  * Format image URL from backend storage path
@@ -356,11 +393,6 @@ export function getStorageUrl(path?: string | null): string {
   }
 
   let cleanPath = path.trim();
-
-  // Manual override for known outdated CMS detail images
-  if (cleanPath.includes('26092026-090825.jpg') || cleanPath.includes('legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-26092026')) {
-    cleanPath = ARTICLE_IMAGE_OVERRIDES[129076];
-  }
 
   // Normalize backend dev/api domain hosts if returned by CMS
   if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {

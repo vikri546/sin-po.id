@@ -10,9 +10,8 @@ export const revalidate = 0;
 
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
-// Node.js Server-side In-Memory Cache for ultra-fast SSR responses (< 10ms)
-const serverArticleMemoryCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL_MS = 60 * 1000; // 60 seconds cache — fast real-time CMS sync for takedowns
+// Node.js Server-side In-Memory Cache (shared with /api/revalidate webhook for instant invalidation)
+import { serverArticleCache as serverArticleMemoryCache, SERVER_ARTICLE_CACHE_TTL_MS as CACHE_TTL_MS } from '../../../src/lib/serverArticleCache';
 
 function extractNumericId(idOrSlug: string): string {
   if (!idOrSlug) return '';
@@ -129,11 +128,6 @@ function resolveStorageUrl(path?: string | null): string {
   }
 
   let cleanPath = path.trim();
-
-  // Manual override for known outdated CMS detail images
-  if (cleanPath.includes('26092026-090825.jpg') || cleanPath.includes('legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-26092026')) {
-    cleanPath = '2026/10/legislator-dki-kawal-hari-terakhir-omc-satu-ton-nacl-powder-disemai-01102026-083332.jpg';
-  }
 
   if (cleanPath.includes('localhost:8000') || cleanPath.includes('127.0.0.1:8000') || cleanPath.includes('api.sinpo.id')) {
     try {
