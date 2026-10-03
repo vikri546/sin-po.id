@@ -1,7 +1,52 @@
+import type { Metadata } from 'next';
 import App from '../src/App';
 import { transformLaravelPostToArticle } from '@/lib/apiClient';
 
 export const revalidate = 60;
+
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    metadataBase: new URL('https://sinpo.id'),
+    title: 'SinPo.id - Matahari Indonesia',
+    description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari seluruh Indonesia secara tajam dan berimbang.',
+    alternates: {
+      canonical: 'https://sinpo.id',
+    },
+    openGraph: {
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      url: 'https://sinpo.id',
+      siteName: 'SinPo.id',
+      images: [
+        {
+          url: 'https://sinpo.id/sinpo-og-banner.png',
+          secureUrl: 'https://sinpo.id/sinpo-og-banner.png',
+          width: 1200,
+          height: 630,
+          type: 'image/png',
+          alt: 'SinPo.id - Matahari Indonesia',
+        },
+      ],
+      locale: 'id_ID',
+      type: 'website',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      site: '@sinpotv',
+      creator: '@sinpotv',
+      title: 'SinPo.id - Matahari Indonesia',
+      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      images: [
+        {
+          url: 'https://sinpo.id/sinpo-og-banner.png',
+          alt: 'SinPo.id - Matahari Indonesia',
+          width: 1200,
+          height: 630,
+        },
+      ],
+    },
+  };
+}
 
 async function fetchHomepageArticlesSSR() {
   try {

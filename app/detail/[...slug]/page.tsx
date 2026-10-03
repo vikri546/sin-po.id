@@ -205,7 +205,7 @@ export async function generateMetadata(props: {
   const articleId = getArticleIdFromSlugArray(slugArray);
 
   if (!articleId) {
-    return getFallbackSiteMetadata();
+    return getSlugFallbackMetadata(slugArray);
   }
 
   const item = await fetchArticleDetailFromApi(articleId);
@@ -289,20 +289,29 @@ export async function generateMetadata(props: {
     };
   }
 
-  return getFallbackSiteMetadata();
+  return getSlugFallbackMetadata(slugArray);
 }
 
-function getFallbackSiteMetadata(): Metadata {
+function getSlugFallbackMetadata(slugArray: string[]): Metadata {
+  const rawSlug = slugArray.slice(1).join(' ') || slugArray[0] || '';
+  const fallbackTitle = rawSlug
+    ? rawSlug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    : 'Berita SinPo.id';
+  const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
+
   return {
     metadataBase: new URL('https://sinpo.id'),
-    title: 'SinPo.id - Matahari Indonesia',
-    description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+    title: fallbackTitle,
+    description: fallbackTitle,
     robots: {
       index: true,
       follow: true,
       'max-image-preview': 'large',
       'max-snippet': -1,
       'max-video-preview': -1,
+    },
+    alternates: {
+      canonical: canonicalUrl,
     },
     icons: {
       icon: [
@@ -313,9 +322,9 @@ function getFallbackSiteMetadata(): Metadata {
       apple: 'https://sinpo.id/sinpo-favicon.png',
     },
     openGraph: {
-      title: 'SinPo.id - Matahari Indonesia',
-      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
-      url: 'https://sinpo.id',
+      title: fallbackTitle,
+      description: fallbackTitle,
+      url: canonicalUrl,
       siteName: 'SinPo.id',
       images: [
         {
@@ -324,22 +333,22 @@ function getFallbackSiteMetadata(): Metadata {
           width: 1200,
           height: 630,
           type: 'image/png',
-          alt: 'SinPo.id - Matahari Indonesia',
+          alt: fallbackTitle,
         },
       ],
       locale: 'id_ID',
-      type: 'website',
+      type: 'article',
     },
     twitter: {
       card: 'summary_large_image',
       site: '@sinpotv',
       creator: '@sinpotv',
-      title: 'SinPo.id - Matahari Indonesia',
-      description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
+      title: fallbackTitle,
+      description: fallbackTitle,
       images: [
         {
           url: 'https://sinpo.id/sinpo-og-banner.png',
-          alt: 'SinPo.id - Matahari Indonesia',
+          alt: fallbackTitle,
           width: 1200,
           height: 630,
         },

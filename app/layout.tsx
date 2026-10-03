@@ -29,31 +29,6 @@ export const metadata: Metadata = {
       'application/rss+xml': 'https://sinpo.id/rss',
     },
   },
-  openGraph: {
-    title: 'SinPo.id - Matahari Indonesia',
-    description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
-    url: 'https://sinpo.id',
-    siteName: 'SinPo.id',
-    images: [
-      {
-        url: 'https://sinpo.id/sinpo-og-banner.png',
-        secureUrl: 'https://sinpo.id/sinpo-og-banner.png',
-        width: 1200,
-        height: 630,
-        type: 'image/png',
-        alt: 'SinPo.id Matahari Indonesia',
-      },
-    ],
-    locale: 'id_ID',
-    type: 'website',
-  },
-  twitter: {
-    card: 'summary_large_image',
-    site: '@sinpotv',
-    title: 'SinPo.id - Matahari Indonesia',
-    description: 'Portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari Indonesia.',
-    images: ['https://sinpo.id/sinpo-og-banner.png'],
-  },
   icons: {
     icon: [
       { url: 'https://sinpo.id/sinpo-favicon.png', type: 'image/png' },

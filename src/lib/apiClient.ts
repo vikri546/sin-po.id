@@ -189,7 +189,7 @@ export async function incrementArticleViewCounter(articleId: string | number): P
 // REAL-TIME TAKEDOWN & CMS SYNC SYSTEM
 // Dynamic runtime takedown + hardcoded fallback IDs
 // ==========================================
-export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031, 129259]);
+export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031, 129259, 129503]);
 const _runtimeTakedownIds = new Set<number>();
 
 /** Helper to extract numeric ID from numbers, '125293', 'laravel-125293', or objects */
