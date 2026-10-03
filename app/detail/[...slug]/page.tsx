@@ -77,41 +77,81 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 SinPoBot/1.0',
   };
 
-  // Tier 1: Single detail query with 5000ms timeout
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  // Tier 1: Single detail query with 6000ms timeout + 1x retry on transient rate-limit/5xx
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-  try {
-    const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
-      cache: 'no-store',
-      headers,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    try {
+      const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
+        cache: 'no-store',
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    if (res.ok) {
-      const json = await res.json();
-      const item = json?.data || json?.result || json;
-      if (item && (item.judul || item.title)) {
-        if (isTakedownArticle(item)) {
-          serverArticleMemoryCache.delete(cacheKey);
-          if (cleanNumericId && cleanNumericId !== cacheKey) {
-            serverArticleMemoryCache.delete(cleanNumericId);
+      if (res.ok) {
+        const json = await res.json();
+        const item = json?.data || json?.result || json;
+        if (item && (item.judul || item.title)) {
+          if (isTakedownArticle(item)) {
+            serverArticleMemoryCache.delete(cacheKey);
+            if (cleanNumericId && cleanNumericId !== cacheKey) {
+              serverArticleMemoryCache.delete(cleanNumericId);
+            }
+            return null;
           }
-          return null;
+          serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
+          if (cleanNumericId && cleanNumericId !== cacheKey) {
+            serverArticleMemoryCache.set(cleanNumericId, { data: item, timestamp: now });
+          }
+          return item;
         }
-        serverArticleMemoryCache.set(cacheKey, { data: item, timestamp: now });
-        if (cleanNumericId && cleanNumericId !== cacheKey) {
-          serverArticleMemoryCache.set(cleanNumericId, { data: item, timestamp: now });
-        }
-        return item;
+      } else if (res.status === 404) {
+        // Explicit 404 Not Found from database
+        break;
       }
+    } catch (e) {
+      clearTimeout(timeoutId);
     }
-  } catch (e) {
-    clearTimeout(timeoutId);
+    if (attempt === 0) {
+      await new Promise(r => setTimeout(r, 250));
+    }
   }
 
-  // Tier 2: Search in Channel pool (/api/berita?limit=100) to bypass 60 req/min single-detail API rate limits
+  // Tier 2: Search query API (/api/berita?q=${targetId}&limit=20) to find article across DB
+  try {
+    const searchController = new AbortController();
+    const searchTimeoutId = setTimeout(() => searchController.abort(), 5000);
+    const searchRes = await fetch(`https://api.sinpo.id/api/berita?q=${encodeURIComponent(targetId)}&limit=20`, {
+      cache: 'no-store',
+      headers,
+      signal: searchController.signal,
+    });
+    clearTimeout(searchTimeoutId);
+
+    if (searchRes.ok) {
+      const searchJson = await searchRes.json();
+      const items = Array.isArray(searchJson?.data) ? searchJson.data : [];
+      const matchedItem = items.find((it: any) => {
+        const itId = String(it.id_berita || it.id || '').trim();
+        const itNumId = extractNumericId(itId);
+        return (cleanNumericId && itNumId === cleanNumericId) || itId === articleIdOrSlug || it.slug === articleIdOrSlug;
+      });
+
+      if (matchedItem && (matchedItem.judul || matchedItem.title)) {
+        if (!isTakedownArticle(matchedItem)) {
+          serverArticleMemoryCache.set(cacheKey, { data: matchedItem, timestamp: now });
+          if (cleanNumericId && cleanNumericId !== cacheKey) {
+            serverArticleMemoryCache.set(cleanNumericId, { data: matchedItem, timestamp: now });
+          }
+          return matchedItem;
+        }
+      }
+    }
+  } catch (e) {}
+
+  // Tier 3: Search in Channel pool (/api/berita?limit=100) to bypass single-detail rate limits
   try {
     const poolController = new AbortController();
     const poolTimeoutId = setTimeout(() => poolController.abort(), 4000);
@@ -143,7 +183,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     }
   } catch (e) {}
 
-  // Tier 3: Emergency Stale Cache fallback (returns last cached version instead of falling back to default site metadata)
+  // Tier 4: Emergency Stale Cache fallback (returns last cached version instead of 404)
   if (serverArticleMemoryCache.has(cacheKey)) {
     const cached = serverArticleMemoryCache.get(cacheKey)!;
     if (!isTakedownArticle(cached.data)) {

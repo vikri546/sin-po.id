@@ -475,8 +475,9 @@ export default function ArticleDetailView({
         }
       } catch (err: any) {
         if (!isMounted) return;
-        // If API returns 404 — article takedown / deleted / rescheduled
-        if (err?.status === 404 || err?.isNotFound) {
+        // Do NOT flip a valid rendered article to 404 on transient background polling network errors!
+        // Only trigger 404 if article has no valid title AND is taken down
+        if ((!article?.title || isTakedownArticle(article)) && (err?.status === 404 || err?.isNotFound)) {
           setIsArticleNotFound(true);
         }
       } finally {
