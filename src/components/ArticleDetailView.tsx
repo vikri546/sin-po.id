@@ -113,8 +113,10 @@ export default function ArticleDetailView({
     setLiveViews(null);
   }, [localArticle, fullContent, isSkeletonMode]);
 
+const ENABLE_TTS = false;
+
   useEffect(() => {
-    if (!localArticle?.id || isSkeletonMode) return;
+    if (!ENABLE_TTS || !localArticle?.id || isSkeletonMode) return;
     const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
     const textSig = `${localArticle.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
     if (articleAudioUrlMemoryCache.has(textSig)) return;
@@ -688,7 +690,13 @@ export default function ArticleDetailView({
         <div className="flex flex-col gap-3.5 py-3.5 border-y border-slate-200/60 dark:border-slate-800/60">
           <div className="flex items-center justify-between gap-1.5 sm:gap-4 w-full">
             <div className="flex items-center gap-1.5 sm:gap-3">
-              {!isAudioActive ? (
+              <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-0.5 min-[375px]:p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] min-[375px]:text-xs font-sans shrink-0">
+                <span className="hidden min-[350px]:inline-block text-[8px] min-[375px]:text-[9px] text-slate-400 uppercase tracking-wider px-1.5 min-[375px]:px-2 font-semibold select-none">HURUF</span>
+                <button onClick={() => setFontSize('sm')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A-</button>
+                <button onClick={() => setFontSize('base')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A</button>
+                <button onClick={() => setFontSize('lg')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A+</button>
+              </div>
+              {ENABLE_TTS && (!isAudioActive ? (
                 <button
                   onClick={toggleSpeech}
                   className="flex items-center gap-1 min-[375px]:gap-1.5 px-2 py-1 min-[375px]:px-3 min-[375px]:py-1.5 rounded-full font-sans text-[9.5px] min-[375px]:text-xs uppercase tracking-wider font-bold transition-all cursor-pointer bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800/50"
@@ -729,13 +737,7 @@ export default function ArticleDetailView({
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-            <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-0.5 min-[375px]:p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] min-[375px]:text-xs font-sans shrink-0">
-              <span className="hidden min-[350px]:inline-block text-[8px] min-[375px]:text-[9px] text-slate-400 uppercase tracking-wider px-1.5 min-[375px]:px-2 font-semibold select-none">HURUF</span>
-              <button onClick={() => setFontSize('sm')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A-</button>
-              <button onClick={() => setFontSize('base')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A</button>
-              <button onClick={() => setFontSize('lg')} className={`px-1.5 min-[375px]:px-2 py-0.5 rounded cursor-pointer ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}>A+</button>
+              ))}
             </div>
           </div>
           {isAudioActive && (

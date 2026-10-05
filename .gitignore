@@ -9,6 +9,7 @@ coverage/
 .env*
 !.env.example
 
-# Generated TTS audio files (stored on VPS, not in repo)
+# Generated TTS audio files & Python TTS environment
 public/audio/tts/
+Orpheus-TTS/
 .cache/

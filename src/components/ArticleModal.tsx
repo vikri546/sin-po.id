@@ -66,9 +66,11 @@ export default function ArticleModal({
     };
   }, [article?.id]);
 
+const ENABLE_TTS = false;
+
   // Silent background pre-generation of TTS audio on modal open for instant 0-1s playback
   useEffect(() => {
-    if (!article?.id) return;
+    if (!ENABLE_TTS || !article?.id) return;
     const contentToUse = article.content || article.summary || '';
     const textSig = `${article.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
     if (modalAudioUrlCache.has(textSig)) return;
@@ -263,8 +265,31 @@ export default function ArticleModal({
               {/* Text to Speech & Bookmark & Share Buttons */}
               <div className="flex items-center gap-2">
                 
+                {/* Font Sizers */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-sans">
+                  <span className="hidden min-[350px]:inline-block text-[10px] text-slate-400 uppercase tracking-wider px-2 font-semibold select-none">HURUF</span>
+                  <button
+                    onClick={() => setFontSize('sm')}
+                    className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
+                  >
+                    A-
+                  </button>
+                  <button
+                    onClick={() => setFontSize('base')}
+                    className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
+                  >
+                    A
+                  </button>
+                  <button
+                    onClick={() => setFontSize('lg')}
+                    className={`px-2 py-1 rounded cursor-pointer ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
+                  >
+                    A+
+                  </button>
+                </div>
+
                 {/* Audio Reader & Executed Controls */}
-                {!isAudioActive ? (
+                {ENABLE_TTS && (!isAudioActive ? (
                   <button
                     onClick={toggleSpeech}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-sans text-xs uppercase tracking-wider font-bold transition-all bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200/50 dark:border-slate-800/50 cursor-pointer"
@@ -321,7 +346,7 @@ export default function ArticleModal({
                       ))}
                     </div>
                   </div>
-                )}
+                ))}
 
                 {/* Bookmark Toggle */}
                 <button
@@ -347,32 +372,9 @@ export default function ArticleModal({
 
               </div>
 
-              {/* Text Resizer & Close Button */}
+              {/* Close Button */}
               <div className="flex items-center gap-3">
                 
-                {/* Font Sizers */}
-                <div className="hidden sm:flex items-center bg-slate-100 dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-sans">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider px-2 font-semibold">UKURAN HURUF</span>
-                  <button
-                    onClick={() => setFontSize('sm')}
-                    className={`px-2 py-1 rounded ${fontSize === 'sm' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-                  >
-                    A-
-                  </button>
-                  <button
-                    onClick={() => setFontSize('base')}
-                    className={`px-2 py-1 rounded ${fontSize === 'base' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-                  >
-                    A
-                  </button>
-                  <button
-                    onClick={() => setFontSize('lg')}
-                    className={`px-2 py-1 rounded ${fontSize === 'lg' ? "bg-white dark:bg-slate-800 text-brand-red-600 font-bold shadow-xs" : "text-slate-500"}`}
-                  >
-                    A+
-                  </button>
-                </div>
-
                 {/* Close X */}
                 <button
                   onClick={onClose}
