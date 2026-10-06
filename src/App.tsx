@@ -275,18 +275,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   // Lock headline article at position 0 (isHero: true) and sort rest by date to eliminate headline blinking
   const lockHeadlineAtFront = useCallback((articles: Article[], targetHeadlineId?: string | null): Article[] => {
     if (!articles || articles.length === 0) return [];
+    const cleanArticles = articles.filter(a => a && a.id && !isTakedownArticle(a));
+    if (cleanArticles.length === 0) return [];
 
     let headlineId = targetHeadlineId || masterHeadlineIdRef.current;
     let headlineArt: Article | null = null;
 
     if (headlineId) {
-      headlineArt = articles.find(a => a.id === headlineId) || null;
+      headlineArt = cleanArticles.find(a => a.id === headlineId) || null;
     }
     if (!headlineArt) {
-      headlineArt = articles.find(a => a.isHero || (a as any).isHeadline || (a as any).headline === '1' || (a as any).headline === 1) || null;
+      headlineArt = cleanArticles.find(a => a.isHero || (a as any).isHeadline || (a as any).headline === '1' || (a as any).headline === 1) || null;
     }
     if (!headlineArt) {
-      headlineArt = articles[0];
+      headlineArt = cleanArticles[0];
     }
 
     if (headlineArt) {
@@ -297,7 +299,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
         } catch {}
       }
 
-      const rest = articles.filter(a => a.id !== headlineArt.id);
+      const rest = cleanArticles.filter(a => a.id !== headlineArt.id);
       rest.sort((a, b) => {
         const timeA = a.publishedAtMs || parseAnyDate(a.date).getTime();
         const timeB = b.publishedAtMs || parseAnyDate(b.date).getTime();
@@ -331,7 +333,8 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
       if (savedMaster && (!initialMasterArticles || initialMasterArticles.length === 0)) {
         const parsed = JSON.parse(savedMaster);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const lockedParsed = lockHeadlineAtFront(parsed, savedHeadlineId);
+          const cleanParsed = parsed.filter((a: Article) => a && a.id && !isTakedownArticle(a));
+          const lockedParsed = lockHeadlineAtFront(cleanParsed, savedHeadlineId);
           setMasterLiveArticles(lockedParsed);
           setArticlesState(lockedParsed);
           masterLiveArticlesRef.current = lockedParsed;
@@ -440,8 +443,8 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           // Merge fresh live articles into existing master live pool with LOCKED Headline at position 0
           setMasterLiveArticles(prev => {
             const existingIds = new Set(validArticles.map(a => a.id));
-            const oldHistorical = prev.filter(a => !existingIds.has(a.id));
-            const rawMerged = [...validArticles, ...oldHistorical];
+            const oldHistorical = prev.filter(a => !existingIds.has(a.id) && !isTakedownArticle(a));
+            const rawMerged = [...validArticles, ...oldHistorical].filter(a => !isTakedownArticle(a));
             const lockedMerged = lockHeadlineAtFront(rawMerged, headlineArt?.id);
             masterLiveArticlesRef.current = lockedMerged;
             if (typeof window !== 'undefined') {
@@ -455,8 +458,8 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           // Also merge into active articlesState with LOCKED Headline at position 0
           setArticlesState(prev => {
             const existingIds = new Set(validArticles.map(a => a.id));
-            const oldHistorical = prev.filter(a => !existingIds.has(a.id));
-            const rawMerged = [...validArticles, ...oldHistorical];
+            const oldHistorical = prev.filter(a => !existingIds.has(a.id) && !isTakedownArticle(a));
+            const rawMerged = [...validArticles, ...oldHistorical].filter(a => !isTakedownArticle(a));
             return lockHeadlineAtFront(rawMerged, headlineArt?.id);
           });
 

@@ -5,9 +5,8 @@ import { transformLaravelPostToArticle, isTakedownArticle } from '../../../src/l
 import { createSlug } from '../../../src/lib/urlHelpers';
 import { Article } from '../../../src/types';
 
-// Force dynamic SSR — never serve stale ISR cache for OG meta
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// ISR Configuration: Revalidate article detail page every 60 seconds
+export const revalidate = 60;
 
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
@@ -88,11 +87,11 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
   if (cleanNumericId || /^\d+$/.test(targetId)) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 14000);
 
       try {
         const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
-          cache: 'no-store',
+          next: { revalidate: 60 },
           headers,
           signal: controller.signal,
         });
@@ -124,7 +123,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
     const poolController = new AbortController();
     const poolTimeoutId = setTimeout(() => poolController.abort(), 5000);
     const poolRes = await fetch(`https://api.sinpo.id/api/berita?limit=100`, {
-      cache: 'no-store',
+      next: { revalidate: 60 },
       headers,
       signal: poolController.signal,
     });
@@ -162,7 +161,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
       const searchController = new AbortController();
       const searchTimeoutId = setTimeout(() => searchController.abort(), 5000);
       const searchRes = await fetch(`https://api.sinpo.id/api/berita?q=${encodeURIComponent(firstKeyword)}&limit=30`, {
-        cache: 'no-store',
+        next: { revalidate: 60 },
         headers,
         signal: searchController.signal,
       });

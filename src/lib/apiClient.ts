@@ -108,13 +108,15 @@ export async function apiFetch<T = any>(
 
   // Append cache-buster _t=timestamp for GET requests when actually making network call
   let url = `${API_BASE_URL}${cleanEndpoint}`;
-  if (!skipCacheBuster && isGetRequest) {
+  const shouldSkipCacheBuster = skipCacheBuster || (revalidate !== undefined && Number(revalidate) > 0);
+  if (!shouldSkipCacheBuster && isGetRequest) {
     const separator = url.includes('?') ? '&' : '?';
     url = `${url}${separator}_t=${Date.now()}`;
   }
 
-  const fetchConfig: RequestInit = {
-    cache: 'no-store', // Always get fresh data from network when fetching
+  const fetchConfig: RequestInit & { next?: { revalidate?: number | false } } = {
+    cache: shouldSkipCacheBuster ? 'default' : 'no-store',
+    ...(revalidate !== undefined && Number(revalidate) > 0 ? { next: { revalidate } } : {}),
     ...customConfig,
     headers: requestHeaders,
   };
@@ -267,7 +269,7 @@ export function isScheduledArticle(articleOrId: any): boolean {
     ? String(articleOrId.status).toLowerCase().trim()
     : '';
 
-  // Explicit scheduled status flags from CMS
+  // 1. Explicit scheduled status flags from CMS
   if (
     pubStr === '2' || pubStr === 'scheduled' || pubStr === 'jadwal' || pubStr === 'terjadwal' ||
     statStr === '2' || statStr === 'scheduled' || statStr === 'jadwal' || statStr === 'terjadwal' ||
@@ -276,17 +278,8 @@ export function isScheduledArticle(articleOrId: any): boolean {
     return true;
   }
 
-  // If publish/status is explicitly published (1 / '1' / true), it is LIVE!
-  if (pubStr === '1' || statStr === '1' || articleOrId.publish === 1 || articleOrId.status === 1) {
-    return false;
-  }
-
-  // If status is explicitly unpublished (0), it is takedown, not scheduled
-  if (pubStr === '0' || statStr === '0') {
-    return false;
-  }
-
-  // Check future publish timestamp (combining tanggal_tayang + waktu) with 60s buffer
+  // 2. Check future publish timestamp (combining tanggal_tayang + waktu) with 60s buffer
+  // MUST run BEFORE checking pubStr === '1', because CMS sets publish='1' even for scheduled articles with a future time.
   const pubDate = parseArticlePublishDate(articleOrId);
   if (pubDate) {
     const now = Date.now();
@@ -294,6 +287,16 @@ export function isScheduledArticle(articleOrId: any): boolean {
     if (pubDate.getTime() > now + 60000) {
       return true;
     }
+  }
+
+  // 3. If status is explicitly unpublished (0), it is takedown, not scheduled
+  if (pubStr === '0' || statStr === '0') {
+    return false;
+  }
+
+  // 4. If publish/status is explicitly published (1 / '1' / true) and time has passed, it is LIVE!
+  if (pubStr === '1' || statStr === '1' || articleOrId.publish === 1 || articleOrId.status === 1) {
+    return false;
   }
 
   return false;

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import App from '../src/App';
-import { transformLaravelPostToArticle } from '@/lib/apiClient';
+import { transformLaravelPostToArticle, isTakedownArticle } from '@/lib/apiClient';
 
 export const revalidate = 60;
 
@@ -58,17 +58,17 @@ async function fetchHomepageArticlesSSR() {
     ]);
 
     if (newsRes && newsRes.success && Array.isArray(newsRes.data)) {
-      const rawNews = newsRes.data.filter((item: any) => item && item.status !== 0 && item.status !== '0');
-      let liveArticles = rawNews.map(transformLaravelPostToArticle).filter((a: any) => a && a.id);
+      const rawNews = newsRes.data.filter((item: any) => item && !isTakedownArticle(item));
+      let liveArticles = rawNews.map(transformLaravelPostToArticle).filter((a: any) => a && a.id && !isTakedownArticle(a));
 
       if (liveArticles.length > 0) {
         liveArticles.sort((a: any, b: any) => (b.publishedAtMs || 0) - (a.publishedAtMs || 0));
 
         let headlineArt: any = null;
         if (headlineRes && headlineRes.success && Array.isArray(headlineRes.data) && headlineRes.data.length > 0) {
-          const cleanHeadlines = headlineRes.data.filter((item: any) => item && item.status !== 0 && item.status !== '0');
+          const cleanHeadlines = headlineRes.data.filter((item: any) => item && !isTakedownArticle(item));
           if (cleanHeadlines.length > 0) {
-            const transformedHeadlines = cleanHeadlines.map(transformLaravelPostToArticle);
+            const transformedHeadlines = cleanHeadlines.map(transformLaravelPostToArticle).filter((a: any) => a && a.id && !isTakedownArticle(a));
             if (transformedHeadlines.length > 0) {
               headlineArt = transformedHeadlines[0];
             }

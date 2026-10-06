@@ -5,6 +5,7 @@ import { Article } from '../types';
 import { POPULAR_NEWS } from '../data/newsData';
 import Skeleton from './skeletons/Skeleton';
 import { getArticleUrl } from '@/lib/urlHelpers';
+import { prefetchArticleDetail } from './ArticleDetailView';
 
 interface NewsGridProps {
   articles: Article[];
@@ -201,7 +202,8 @@ export default function NewsGrid({
             e.preventDefault();
             onSelectArticle(heroArticle);
           }}
-          onMouseEnter={handleHeroMouseEnter}
+          onMouseEnter={() => { handleHeroMouseEnter(); prefetchArticleDetail(heroArticle); }}
+          onTouchStart={() => prefetchArticleDetail(heroArticle)}
           onMouseLeave={handleHeroMouseLeave}
         >
           {/* Main Hero Image */}
@@ -334,6 +336,8 @@ export default function NewsGrid({
                   key={article.id}
                   id={`article-card-${article.id}`}
                   href={getArticleUrl(article)}
+                  onMouseEnter={() => prefetchArticleDetail(article)}
+                  onTouchStart={() => prefetchArticleDetail(article)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                     e.preventDefault();

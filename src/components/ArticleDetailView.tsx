@@ -28,12 +28,64 @@ import NotFoundView from './NotFoundView';
 const articleContentMemoryCache = new Map<string, string>();
 const articleAudioUrlMemoryCache = new Map<string, string>();
 
+// Cache promise request yang sedang berjalan agar prefetch + fetch di komponen tidak dobel
+const articleDetailInflight = new Map<string, Promise<any>>();
+
+const MIN_BODY_TEXT_LENGTH = 80;
+
+const resolveTargetIdOrSlug = (art: Article): string => {
+  const rawId = String(art.id || '').replace('laravel-', '');
+  const numericId = getNumericId(art.id) || rawId;
+  return String(numericId || (art as any).slug || rawId);
+};
+
+const fetchDetailShared = (targetIdOrSlug: string): Promise<any> => {
+  const existing = articleDetailInflight.get(targetIdOrSlug);
+  if (existing) return existing;
+  const p = apiFetch(`/berita/${targetIdOrSlug}`).finally(() => {
+    articleDetailInflight.delete(targetIdOrSlug);
+  });
+  articleDetailInflight.set(targetIdOrSlug, p);
+  return p;
+};
+
+/**
+ * OPSIONAL: panggil fungsi ini dari komponen induk (mis. onMouseEnter / onTouchStart pada kartu berita)
+ * agar isi berita sudah ter-cache sebelum halaman detail dibuka.
+ */
+export const prefetchArticleDetail = (art: Article) => {
+  if (!art || !art.id || articleContentMemoryCache.has(art.id)) return;
+  fetchDetailShared(resolveTargetIdOrSlug(art))
+    .then((res: any) => {
+      const d = res?.data;
+      if (!d) return;
+      const content = d.isi || d.content || d.ringkasan || d.excerpt || d.sub_judul || '';
+      if (content) articleContentMemoryCache.set(art.id, content);
+    })
+    .catch(() => {});
+};
+
+const getFullBodyFromArticle = (art: Article | null | undefined): string => {
+  if (!art) return '';
+  if (art.id && articleContentMemoryCache.has(art.id)) {
+    return articleContentMemoryCache.get(art.id)!;
+  }
+  return art.content || (art as any)?.isi || art.summary || art.subtitle || '';
+};
+
+const getFallbackBodyFromArticle = (art: Article | null | undefined): string => {
+  if (!art) return '';
+  return art.content || (art as any)?.isi || art.summary || art.subtitle || '';
+};
+
+const hasEnoughBody = (html: string): boolean => stripHtml(html || '').trim().length >= MIN_BODY_TEXT_LENGTH;
+
 const buildInitialContent = (art: Article | null): string => {
   if (!art) return '';
   if (art.id && articleContentMemoryCache.has(art.id)) {
     return articleContentMemoryCache.get(art.id)!;
   }
-  const best = art.content || (art as any)?.isi || art.summary || art.subtitle || '';
+  const best = getFallbackBodyFromArticle(art);
   const cleanBest = stripHtml(best).trim();
   if (cleanBest.length >= 25) {
     return best;
@@ -51,6 +103,24 @@ const calculateSpeechDuration = (title?: string, author?: string, content?: stri
   return Math.max(30, Math.round((words / 160) * 60));
 };
 
+// Skeleton khusus bagian isi berita
+const BodySkeleton = () => (
+  <div className="flex flex-col gap-3 py-2" aria-busy="true" aria-label="Memuat isi berita">
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <Skeleton className="h-4 w-11/12 rounded-sm" />
+    <Skeleton className="h-4 w-4/5 rounded-sm" />
+    <div className="my-2" />
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <Skeleton className="h-4 w-5/6 rounded-sm" />
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <div className="my-2" />
+    <Skeleton className="h-4 w-full rounded-sm" />
+    <Skeleton className="h-4 w-3/4 rounded-sm" />
+  </div>
+);
+
 export default function ArticleDetailView({
   article,
   onBack,
@@ -67,7 +137,7 @@ export default function ArticleDetailView({
   isLoading = false
 }: ArticleDetailViewProps) {
   
-  // PERBAIKAN: Buat State Lokal (Local Article) agar Data yang ter-fetch secara otomatis mengganti Skeleton
+  // State Lokal (Local Article) agar Data yang ter-fetch secara otomatis mengganti Skeleton
   const [localArticle, setLocalArticle] = useState<Article>(article);
   const [isFallbackMode, setIsFallbackMode] = useState<boolean>(() => (article as any).isFallback || article?.title === 'Sedang memuat konten...');
 
@@ -91,22 +161,23 @@ export default function ArticleDetailView({
   
   const [liveViews, setLiveViews] = useState<number | null>(null);
   const [liveImageUrl, setLiveImageUrl] = useState<string>(localArticle?.imageUrl || '');
-  const [fullContent, setFullContent] = useState<string>(() => {
-    if (localArticle?.id && articleContentMemoryCache.has(localArticle.id)) {
-      return articleContentMemoryCache.get(localArticle.id)!;
-    }
-    return localArticle?.content || (localArticle as any)?.isi || localArticle?.summary || localArticle?.subtitle || '';
-  });
+
+  // PERBAIKAN: state awal HANYA berisi konten penuh (cache / content / isi), bukan summary/subtitle.
+  // Dengan begitu isi berita tidak "berganti" dari ringkasan ke konten penuh (yang terasa telat).
+  const [fullContent, setFullContent] = useState<string>(() => getFullBodyFromArticle(localArticle));
   
-  const [isFetchingDetail, setIsFetchingDetail] = useState<boolean>(() => {
-    if (localArticle?.id && articleContentMemoryCache.has(localArticle.id)) return false;
-    const existing = localArticle?.content || (localArticle as any)?.isi || '';
-    return stripHtml(existing).trim().length < 80;
-  });
+  // PERBAIKAN: selama konten penuh belum ada, bagian isi menampilkan skeleton sehingga layout stabil
+  const [isFetchingDetail, setIsFetchingDetail] = useState<boolean>(() => !hasEnoughBody(getFullBodyFromArticle(localArticle)));
+
+  // Menandai artikel (id) yang konten penuhnya sudah berhasil diambil dari API,
+  // supaya tidak tertimpa kembali oleh data prop yang lebih pendek.
+  const fetchedContentIdRef = useRef<string | null>(
+    localArticle?.id && articleContentMemoryCache.has(localArticle.id) ? localArticle.id : null
+  );
 
   useEffect(() => {
     if (!localArticle || isSkeletonMode) return;
-    const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+    const contentToUse = fullContent || getFallbackBodyFromArticle(localArticle);
     const seconds = calculateSpeechDuration(localArticle.title, localArticle.author, contentToUse);
     setSpeechDuration(seconds);
     setSpeechProgress(0);
@@ -117,7 +188,7 @@ const ENABLE_TTS = false;
 
   useEffect(() => {
     if (!ENABLE_TTS || !localArticle?.id || isSkeletonMode) return;
-    const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+    const contentToUse = fullContent || getFallbackBodyFromArticle(localArticle);
     const textSig = `${localArticle.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}`;
     if (articleAudioUrlMemoryCache.has(textSig)) return;
 
@@ -147,15 +218,19 @@ const ENABLE_TTS = false;
 
   useEffect(() => {
     if (!localArticle || isSkeletonMode) return;
+
+    // Jika konten penuh dari API sudah pernah diambil untuk artikel ini, jangan ditimpa
+    if (localArticle.id && fetchedContentIdRef.current === localArticle.id) return;
+
     if (localArticle.id && articleContentMemoryCache.has(localArticle.id)) {
       const cached = articleContentMemoryCache.get(localArticle.id)!;
+      fetchedContentIdRef.current = localArticle.id;
       setFullContent(cached);
       setIsFetchingDetail(false);
     } else {
-      const bestContent = localArticle.content || (localArticle as any)?.isi || localArticle.summary || localArticle.subtitle || '';
+      const bestContent = getFullBodyFromArticle(localArticle);
       setFullContent(bestContent);
-      const textLen = stripHtml(bestContent).trim().length;
-      setIsFetchingDetail(textLen < 80);
+      setIsFetchingDetail(!hasEnoughBody(bestContent));
     }
   }, [localArticle?.id, localArticle?.content, isSkeletonMode]);
 
@@ -273,14 +348,13 @@ const ENABLE_TTS = false;
     }
     setIsArticleNotFound(false);
 
-    const rawId = localArticle.id.replace('laravel-', '');
-    const numericId = getNumericId(localArticle.id) || rawId;
-    const targetIdOrSlug = numericId || (localArticle as any).slug || rawId;
+    const targetIdOrSlug = resolveTargetIdOrSlug(localArticle);
     let hasIncrementedCounter = false;
 
     async function fetchArticleDetail(isInitial: boolean = false) {
       try {
-        const res = await apiFetch(`/berita/${targetIdOrSlug}`);
+        // Request pertama memakai shared promise (bisa sudah berjalan lewat prefetch), polling pakai apiFetch biasa
+        const res = isInitial ? await fetchDetailShared(targetIdOrSlug) : await apiFetch(`/berita/${targetIdOrSlug}`);
         if (!isMounted) return;
 
         if (res && res.data) {
@@ -318,7 +392,10 @@ const ENABLE_TTS = false;
 
           const fetchedContent = detailData.isi || detailData.content || detailData.ringkasan || detailData.excerpt || detailData.sub_judul || '';
           if (fetchedContent) {
-            if (localArticle?.id) articleContentMemoryCache.set(localArticle.id, fetchedContent);
+            if (localArticle?.id) {
+              articleContentMemoryCache.set(localArticle.id, fetchedContent);
+              fetchedContentIdRef.current = localArticle.id;
+            }
             setFullContent(fetchedContent);
             setIsFetchingDetail(false);
           }
@@ -347,11 +424,12 @@ const ENABLE_TTS = false;
         }
       } catch (err: any) {
         if (!isMounted) return;
-        // PERBAIKAN: Client baru akan men-trigger 404 jika response API jelas adalah 404 dan bukan transient issue
+        // Client baru akan men-trigger 404 jika response API jelas adalah 404 dan bukan transient issue
         if ((!localArticle?.title || isFallbackMode || isTakedownArticle(localArticle)) && (err?.status === 404 || err?.isNotFound)) {
           setIsArticleNotFound(true);
         }
       } finally {
+        // Apapun hasilnya (sukses/gagal), skeleton isi berita harus berhenti agar fallback konten tampil
         if (isMounted && isInitial) setIsFetchingDetail(false);
       }
     }
@@ -402,7 +480,7 @@ const ENABLE_TTS = false;
       audio.playbackRate = playbackRate;
       audioRef.current = audio;
 
-      const contentToUse = fullContent || localArticle.content || localArticle.summary || '';
+      const contentToUse = fullContent || getFallbackBodyFromArticle(localArticle);
       const textSig = localArticle.id ? `${localArticle.id}_${contentToUse.length}_${contentToUse.slice(0, 30)}` : '';
       let audioUrl = textSig ? articleAudioUrlMemoryCache.get(textSig) : undefined;
 
@@ -494,6 +572,9 @@ const ENABLE_TTS = false;
     onShare("Tautan artikel berhasil disalin ke papan klip!");
   };
 
+  // Tampilkan BodySkeleton hanya jika benar-benar tidak ada teks deskripsi/ringkasan sama sekali
+  const isBodyLoading = isFetchingDetail && !stripHtml(fullContent || getFallbackBodyFromArticle(localArticle)).trim();
+
   // Render Skeleton jika state masih di mode kerangka Fallback (API Server tadinya gagal memuat data utuh)
   if (isSkeletonMode) {
     return (
@@ -535,20 +616,7 @@ const ENABLE_TTS = false;
               <Skeleton className="h-8 w-28 rounded-lg" />
             </div>
           </div>
-          <div className="flex flex-col gap-3 py-4">
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <Skeleton className="h-4 w-11/12 rounded-sm" />
-            <Skeleton className="h-4 w-4/5 rounded-sm" />
-            <div className="my-2" />
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <Skeleton className="h-4 w-5/6 rounded-sm" />
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <div className="my-2" />
-            <Skeleton className="h-4 w-full rounded-sm" />
-            <Skeleton className="h-4 w-3/4 rounded-sm" />
-          </div>
+          <BodySkeleton />
         </div>
       </article>
     );
@@ -773,12 +841,16 @@ const ENABLE_TTS = false;
 
         <div className="relative flex flex-col gap-6 pb-12 md:pb-0">
           <div className="flex flex-col gap-4">
-            <div
-              className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 transition-all duration-300 ${
-                fontSize === 'sm' ? "text-sm" : fontSize === 'base' ? "text-base" : "text-lg md:text-xl"
-              }`}
-              dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || buildInitialContent(localArticle)) }}
-            />
+            {isBodyLoading ? (
+              <BodySkeleton />
+            ) : (
+              <div
+                className={`article-content font-sans tracking-wide leading-relaxed text-slate-800 dark:text-slate-200 transition-all duration-300 ${
+                  fontSize === 'sm' ? "text-sm" : fontSize === 'base' ? "text-base" : "text-lg md:text-xl"
+                }`}
+                dangerouslySetInnerHTML={{ __html: formatArticleHtml(fullContent || buildInitialContent(localArticle)) }}
+              />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 pt-4 border-b border-slate-100 dark:border-slate-900/40 pb-4">
             <span className="font-sans text-xs font-bold text-slate-600 dark:text-slate-400 mr-1">Tags:</span>
@@ -856,7 +928,7 @@ const ENABLE_TTS = false;
                   const showImageContainer = isMobileImage || isDesktopImage;
 
                   return (
-                    <a key={related.id} href={getArticleUrl(related)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(related); }} className="group flex gap-3.5 py-3.5 bg-transparent border-b border-slate-100 dark:border-slate-900 rounded-none cursor-pointer transition-all text-left">
+                    <a key={related.id} href={getArticleUrl(related)} onMouseEnter={() => prefetchArticleDetail(related)} onTouchStart={() => prefetchArticleDetail(related)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(related); }} className="group flex gap-3.5 py-3.5 bg-transparent border-b border-slate-100 dark:border-slate-900 rounded-none cursor-pointer transition-all text-left">
                       {showImageContainer && related.imageUrl && (
                         <div className={`shrink-0 ${imageVisibilityClass}`}>
                           <img src={related.imageUrl} alt={related.title} referrerPolicy="no-referrer" className="w-16 h-16 sm:w-20 sm:h-20 object-cover aspect-square rounded-[4px] border border-slate-100 dark:border-slate-900" />
@@ -889,7 +961,7 @@ const ENABLE_TTS = false;
               </div>
               <div className="flex flex-col">
                 {latestArticles.map((latest) => (
-                  <a key={latest.id} href={getArticleUrl(latest)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(latest); }} className="group flex flex-row gap-4 py-4 border-b border-slate-100 dark:border-slate-900/40 cursor-pointer bg-transparent last:border-b-0">
+                  <a key={latest.id} href={getArticleUrl(latest)} onMouseEnter={() => prefetchArticleDetail(latest)} onTouchStart={() => prefetchArticleDetail(latest)} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return; e.preventDefault(); onSelectArticle?.(latest); }} className="group flex flex-row gap-4 py-4 border-b border-slate-100 dark:border-slate-900/40 cursor-pointer bg-transparent last:border-b-0">
                     <div className="relative w-24 h-16 md:w-36 md:h-24 shrink-0 overflow-hidden rounded-[5px] bg-slate-100 dark:bg-slate-900">
                       <img src={latest.imageUrl} alt={latest.title} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
                     </div>
