@@ -273,12 +273,15 @@ export async function generateMetadata(props: {
   // PERBAIKAN: Jika item gagal diload (NULL/Timeout) - Jangan Tampilkan 404! 
   // Berikan metadadata fallback agar NextJS bisa melanjutkan render dan client fetcher mengambil datanya.
   if (!item || (!item.judul && !item.title)) {
-    const fallbackTitle = slugArray.join(' ').replace(/-/g, ' ').toUpperCase();
+    const rawSlugText = slugArray.map(s => s.replace(/-\d+$/, '')).join(' ');
+    const fallbackTitle = rawSlugText
+      ? rawSlugText.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim()
+      : 'Berita SinPo.id';
     const canonicalUrl = `https://sinpo.id/detail/${slugArray.join('/')}`;
     return {
       metadataBase: new URL('https://sinpo.id'),
       title: `${fallbackTitle} - SinPo.id`,
-      description: 'Memuat detail berita...',
+      description: `Informasi terkini mengenai ${fallbackTitle} di SinPo.id`,
       alternates: { canonical: canonicalUrl },
       robots: { index: false, follow: true },
     };
@@ -394,10 +397,17 @@ export default async function DetailCatchAllPage(props: {
 
   if (!fetchedItem || (!fetchedItem.judul && !fetchedItem.title)) {
     isFallback = true;
+
+    // Generasi Judul Manusiawi dari Slug URL agar GA & SEO tidak mencatat "Sedang memuat konten..."
+    const rawSlugText = slugArray.map(s => s.replace(/-\d+$/, '')).join(' ');
+    const readableTitleFromSlug = rawSlugText
+      ? rawSlugText.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim()
+      : 'Berita SinPo.id';
+
     itemToProcess = {
       id_berita: cleanNumId || articleId,
       slug: slugArray.join('/'),
-      judul: 'Sedang memuat konten...',
+      judul: readableTitleFromSlug,
       ringkasan: 'Mengambil data dari server...',
       isi: '<p>Memuat berita...</p>',
       kategori: { nama: 'BERITA' },
