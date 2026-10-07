@@ -2056,8 +2056,11 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
           <div className="flex flex-col gap-3 text-left col-span-1">
             <h4 className="font-sans font-extrabold uppercase tracking-widest text-[11px] text-slate-200">KATEGORI</h4>
             <div className="flex flex-col gap-2 font-sans text-[11px] font-bold uppercase tracking-wider text-slate-500">
-              <button 
-                onClick={() => {
+              <a 
+                href={getCategoryUrl("POLITIK")}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
+                  e.preventDefault();
                   setSelectedCategory("POLITIK");
                   setShowBookmarksOnly(false);
                   handleSelectArticle(null, true);
@@ -2065,14 +2068,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                   setSelectedTag(null);
                   setSearchQuery("");
                   setSearchDate("");
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState(null, '', getCategoryUrl("POLITIK"));
+                  }
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 POLITIK
-              </button>
-              <button 
-                onClick={() => {
+              </a>
+              <a 
+                href={getCategoryUrl("HUKUM")}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
+                  e.preventDefault();
                   setSelectedCategory("HUKUM");
                   setShowBookmarksOnly(false);
                   handleSelectArticle(null, true);
@@ -2080,14 +2089,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                   setSelectedTag(null);
                   setSearchQuery("");
                   setSearchDate("");
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState(null, '', getCategoryUrl("HUKUM"));
+                  }
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 HUKUM
-              </button>
-              <button 
-                onClick={() => {
+              </a>
+              <a 
+                href={getCategoryUrl("EKBIS")}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
+                  e.preventDefault();
                   setSelectedCategory("EKBIS");
                   setShowBookmarksOnly(false);
                   handleSelectArticle(null, true);
@@ -2095,14 +2110,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                   setSelectedTag(null);
                   setSearchQuery("");
                   setSearchDate("");
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState(null, '', getCategoryUrl("EKBIS"));
+                  }
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 EKONOMI & BISNIS
-              </button>
-              <button 
-                onClick={() => {
+              </a>
+              <a 
+                href={getCategoryUrl("PERISTIWA")}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
+                  e.preventDefault();
                   setSelectedCategory("PERISTIWA");
                   setShowBookmarksOnly(false);
                   handleSelectArticle(null, true);
@@ -2110,12 +2131,36 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                   setSelectedTag(null);
                   setSearchQuery("");
                   setSearchDate("");
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState(null, '', getCategoryUrl("PERISTIWA"));
+                  }
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
                 className="hover:text-white transition-colors text-left cursor-pointer"
               >
                 PERISTIWA
-              </button>
+              </a>
+              <a 
+                href={getCategoryUrl("GAYA HIDUP")}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
+                  e.preventDefault();
+                  setSelectedCategory("GAYA HIDUP");
+                  setShowBookmarksOnly(false);
+                  handleSelectArticle(null, true);
+                  setSubmittedSearchQuery(null);
+                  setSelectedTag(null);
+                  setSearchQuery("");
+                  setSearchDate("");
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState(null, '', getCategoryUrl("GAYA HIDUP"));
+                  }
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="hover:text-white transition-colors text-left cursor-pointer"
+              >
+                GAYA HIDUP
+              </a>
             </div>
           </div>
  
@@ -2124,7 +2169,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
             <h4 className="font-sans font-extrabold uppercase tracking-widest text-[11px] text-slate-200">PERUSAHAAN</h4>
             <div className="flex flex-col gap-2 font-sans text-[11px] font-bold uppercase tracking-wider text-slate-500">
               <a 
-                href="?page=tentang-kami"
+                href={getStaticPageUrl("tentang-kami")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
@@ -2135,7 +2180,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 TENTANG KAMI
               </a>
               <a 
-                href="?page=redaksi"
+                href={getStaticPageUrl("redaksi")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
@@ -2146,7 +2191,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 REDAKSI
               </a>
               <a 
-                href="?page=hak-jawab"
+                href={getStaticPageUrl("hak-jawab")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
@@ -2157,7 +2202,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 HAK JAWAB
               </a>
               <a 
-                href="?page=hubungi-kami"
+                href={getStaticPageUrl("hubungi-kami")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
@@ -2168,7 +2213,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 HUBUNGI KAMI
               </a>
               <a 
-                href="?page=kebijakan-privasi"
+                href={getStaticPageUrl("kebijakan-privasi")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
@@ -2179,7 +2224,7 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
                 KEBIJAKAN PRIVASI
               </a>
               <a 
-                href="?page=pedoman-siber"
+                href={getStaticPageUrl("pedoman-siber")}
                 onClick={(e) => {
                   if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0)) return;
                   e.preventDefault();
