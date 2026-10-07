@@ -5,11 +5,14 @@
 export const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_ID || '';
 
 // Log page views for SPA navigation
-export const pageview = (url: string) => {
+export const pageview = (url: string, title?: string) => {
   if (typeof window !== 'undefined' && window.gtag && GA_MEASUREMENT_ID) {
-    window.gtag('config', GA_MEASUREMENT_ID, {
-      page_path: url,
-    });
+    setTimeout(() => {
+      window.gtag('config', GA_MEASUREMENT_ID, {
+        page_path: url,
+        page_title: title || document.title,
+      });
+    }, 0);
   }
 };
 

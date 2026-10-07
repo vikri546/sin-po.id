@@ -1373,12 +1373,12 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    let titleText = 'SinPo.id – Matahari Indonesia';
+    let titleText = 'SinPo.id - Matahari Indonesia';
     let metaDescriptionText = 'SinPo.id adalah portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari seluruh Indonesia secara tajam dan berimbang.';
 
     if (activeModalArticle) {
       const cleanTitle = stripHtml(activeModalArticle.title);
-      titleText = `${cleanTitle} – SinPo.id`;
+      titleText = `${cleanTitle} - SinPo.id`;
       metaDescriptionText = activeModalArticle.summary || cleanTitle;
     } else if (staticModalSlug) {
       const staticTitleMap: Record<string, string> = {
@@ -1397,20 +1397,20 @@ export default function App({ initialArticle = null, initialCategory = 'SEMUA', 
         'pedoman-pemberitaan-media-siber': 'Pedoman Pemberitaan Media Siber SinPo.id - Standar etika jurnalistik siber dan panduan penerbitan berita terpercaya sesuai ketentuan Dewan Pers.',
       };
       const pageTitle = staticTitleMap[staticModalSlug] || 'Halaman';
-      titleText = `${pageTitle} – SinPo.id`;
+      titleText = `${pageTitle} - SinPo.id`;
       metaDescriptionText = staticDescMap[staticModalSlug] || `Informasi resmi ${pageTitle} portal berita SinPo.id Matahari Indonesia.`;
     } else if (submittedSearchQuery && submittedSearchQuery.trim()) {
-      titleText = `Pencarian: "${submittedSearchQuery.trim()}" – SinPo.id`;
+      titleText = `Pencarian: "${submittedSearchQuery.trim()}" - SinPo.id`;
       metaDescriptionText = `Hasil pencarian berita untuk kata kunci "${submittedSearchQuery.trim()}" di portal berita SinPo.id.`;
     } else if (selectedTag && selectedTag.trim()) {
-      titleText = `Tag: #${selectedTag.trim()} – SinPo.id`;
+      titleText = `Tag: #${selectedTag.trim()} - SinPo.id`;
       metaDescriptionText = `Kumpulan berita dengan topik #${selectedTag.trim()} terbaru di SinPo.id.`;
     } else if (selectedCategory === 'INDEKS') {
-      titleText = `Indeks Berita – SinPo.id`;
+      titleText = `Indeks Berita - SinPo.id`;
       metaDescriptionText = `Arsip dan indeks berita lengkap terkini SinPo.id Matahari Indonesia.`;
     } else if (selectedCategory && selectedCategory !== 'SEMUA') {
       const catUpper = selectedCategory.toUpperCase();
-      titleText = `${catUpper} – SinPo.id`;
+      titleText = `${catUpper} - SinPo.id`;
       const catDescMap: Record<string, string> = {
         'POLITIK': 'Berita Politik Terkini & Parlemen - Kabar berita politik nasional, kebijakan pemerintah, isu DPR/MPR, dan dinamika politik Indonesia terbaru di SinPo.id.',
         'HUKUM': 'Berita Hukum & Kriminalitas Terkini - Mengulas isu hukum, persidangan, kejaksaan, kepolisian, dan keadilan di Indonesia di SinPo.id.',

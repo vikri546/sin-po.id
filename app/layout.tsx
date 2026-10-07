@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://sinpo.id'),
   title: {
     default: 'SinPo.id - Matahari Indonesia',
-    template: '%s – SinPo.id',
+    template: '%s - SinPo.id',
   },
   description: 'SinPo.id adalah portal berita politik terpercaya yang mengulas berita politik nasional, hukum, ekonomi, peristiwa terkini, dan informasi aktual dari seluruh Indonesia secara tajam dan berimbang.',
   keywords: [
