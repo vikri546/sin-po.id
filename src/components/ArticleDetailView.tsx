@@ -285,12 +285,15 @@ const ENABLE_TTS = false;
 
     if (isSameArticle) {
       setLiveImageUrl((prev) => pickNewerImageUrl(prev, localArticle?.imageUrl));
+      if (localArticle?.galleryImages && localArticle.galleryImages.length > 0) {
+        setLiveGalleryImages((prev) => (prev.length > 0 ? prev : localArticle.galleryImages!));
+      }
     } else {
       setLiveImageUrl(localArticle?.imageUrl || '');
+      setLiveGalleryImages(localArticle?.galleryImages || []);
+      setActiveImageIndex(0);
+      setIsArticleNotFound(isTakedownArticle(localArticle) || isScheduledArticle(localArticle));
     }
-    setLiveGalleryImages(localArticle?.galleryImages || []);
-    setActiveImageIndex(0);
-    setIsArticleNotFound(isTakedownArticle(localArticle) || isScheduledArticle(localArticle));
   }, [localArticle]);
 
   const allGalleryImages = React.useMemo(() => {
@@ -416,10 +419,9 @@ const ENABLE_TTS = false;
               const photoPath = g.nama_photo || g.foto || g.gambar || g.photo || g.url || g.image || '';
               return getStorageUrl(photoPath);
             }).filter(Boolean);
-            if (parsedGal.length > 0) setLiveGalleryImages(parsedGal);
-            else setLiveGalleryImages(localArticle?.galleryImages || []);
-          } else {
-            setLiveGalleryImages(localArticle?.galleryImages || []);
+            if (parsedGal.length > 0) {
+              setLiveGalleryImages(parsedGal);
+            }
           }
         }
       } catch (err: any) {
