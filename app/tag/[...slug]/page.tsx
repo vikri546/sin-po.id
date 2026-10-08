@@ -9,7 +9,7 @@ export async function generateMetadata(props: {
   const slugArray = params?.slug || [];
   const rawTag = slugArray[0] || 'Berita';
   const cleanTag = rawTag.replace(/-/g, ' ');
-  const title = `Berita Tag #${cleanTag} - SinPo.id`;
+  const title = `Berita Tag #${cleanTag} – SinPo.id`;
   const description = `Kumpulan berita terkini dan topik hangat seputar #${cleanTag} di SinPo.id Matahari Indonesia.`;
   const canonicalUrl = `https://sinpo.id/tag/${slugArray.join('/')}`;
 

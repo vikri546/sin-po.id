@@ -9,7 +9,7 @@ export async function generateMetadata(props: {
   const slugArray = params?.slug || [];
   const rawKat = slugArray[0] || 'Berita';
   const cleanKat = rawKat.replace(/-/g, ' ').toUpperCase();
-  const title = `Berita ${cleanKat} Terkini - SinPo.id`;
+  const title = `Berita ${cleanKat} Terkini – SinPo.id`;
   const description = `Kumpulan berita politik, hukum, ekonomi, dan peristiwa terkini kategori ${cleanKat} di SinPo.id Matahari Indonesia.`;
   const canonicalUrl = `https://sinpo.id/kategori/${slugArray.join('/')}`;
 
