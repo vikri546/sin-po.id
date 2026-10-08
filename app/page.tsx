@@ -52,10 +52,13 @@ async function fetchHomepageArticlesSSR() {
   try {
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://api.sinpo.id/api';
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
     const [headlineRes, newsRes] = await Promise.all([
-      fetch(`${API_BASE}/headline?limit=1`, { next: { revalidate: 60 } }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${API_BASE}/berita?limit=100`, { next: { revalidate: 60 } }).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]);
+      fetch(`${API_BASE}/headline?limit=1`, { next: { revalidate: 60 }, signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${API_BASE}/berita?limit=100`, { next: { revalidate: 60 }, signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).finally(() => clearTimeout(timeoutId));
 
     if (newsRes && newsRes.success && Array.isArray(newsRes.data)) {
       const rawNews = newsRes.data.filter((item: any) => item && !isTakedownArticle(item));

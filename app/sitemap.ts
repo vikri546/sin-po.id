@@ -69,13 +69,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Latest Articles from CMS API
   let articlePages: MetadataRoute.Sitemap = [];
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
     const res = await fetch('https://api.sinpo.id/api/berita?limit=50', {
       headers: {
         Authorization: 'Bearer LMyrBrMUP8zpYV5d',
         Accept: 'application/json',
       },
       next: { revalidate: 300 },
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
+
     if (res.ok) {
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
