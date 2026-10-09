@@ -3,6 +3,7 @@ import { Article } from '@/types';
 import { stripHtml } from './htmlRenderer';
 import { formatRelativeDate, parseAnyDate } from './dateFormatter';
 import { getNumericId } from './urlHelpers';
+import { markTakedown, isRuntimeTakedownId } from './serverArticleCache';
 
 const getApiBaseUrl = () => {
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -187,11 +188,14 @@ export async function incrementArticleViewCounter(articleId: string | number): P
   return null;
 }
 
-// ==========================================
-// REAL-TIME TAKEDOWN & CMS SYNC SYSTEM
-// Dynamic runtime takedown + hardcoded fallback IDs
-// ==========================================
-export const TAKEDOWN_ARTICLE_IDS = new Set<number>([125293, 125206, 1000, 126031, 129259, 129503, 129813]);
+// Hanya untuk keadaan darurat (mis. perintah hukum mendesak saat CMS bermasalah).
+// Isi lewat .env tanpa ubah kode: TAKEDOWN_IDS=125293,126031
+export const TAKEDOWN_ARTICLE_IDS = new Set<number>(
+  (process.env.TAKEDOWN_IDS || '')
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => n > 0)
+);
 
 /** Helper to extract numeric ID from numbers, '125293', 'laravel-125293', or objects */
 export function extractNumericArticleId(val: any): number {
@@ -202,12 +206,12 @@ export function extractNumericArticleId(val: any): number {
   return match ? parseInt(match[0], 10) : 0;
 }
 
-/** Legacy stub for backward compatibility */
-export function addTakedownId(_id: number) {}
+export function addTakedownId(id: number) {
+  markTakedown(id);
+}
 
-/** Legacy stub for backward compatibility */
-export function isRuntimeTakedown(_id: number): boolean {
-  return false;
+export function isRuntimeTakedown(id: number): boolean {
+  return isRuntimeTakedownId(id);
 }
 
 /**
@@ -316,9 +320,18 @@ export function isTakedownArticle(articleOrId: any): boolean {
     id = extractNumericArticleId(articleOrId);
   }
 
-  // 1. Check known hardcoded takedown IDs
-  if (id > 0 && TAKEDOWN_ARTICLE_IDS.has(id)) {
-    return true;
+  // 1. Check known hardcoded takedown IDs, dynamic env TAKEDOWN_IDS, or runtime takedown IDs
+  if (id > 0) {
+    if (TAKEDOWN_ARTICLE_IDS.has(id) || isRuntimeTakedown(id)) {
+      return true;
+    }
+    const envStr = process.env.TAKEDOWN_IDS || '';
+    if (envStr) {
+      const envIds = envStr.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => n > 0);
+      if (envIds.includes(id)) {
+        return true;
+      }
+    }
   }
 
   if (typeof articleOrId === 'object') {
@@ -329,12 +342,12 @@ export function isTakedownArticle(articleOrId: any): boolean {
       ? String(articleOrId.status).trim()
       : '';
 
-    // 2. CMS publish=0 means article is taken down by redaksi
-    if (pubStr === '0') {
+    // 2. CMS publish=0 / draft means article is taken down / saved as draft by redaksi
+    if (pubStr === '0' || pubStr === 'draft' || pubStr === 'false') {
       return true;
     }
-    // 3. CMS status=0 means article is unpublished
-    if (statStr === '0' || articleOrId.status === false) {
+    // 3. CMS status=0 / draft means article is unpublished
+    if (statStr === '0' || statStr === 'draft' || statStr === 'false' || articleOrId.status === false) {
       return true;
     }
     // 4. Scheduled articles (future publish date) are not live yet

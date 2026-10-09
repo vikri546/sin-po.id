@@ -11,7 +11,7 @@ export const revalidate = 60;
 const API_TOKEN = process.env.NEXT_PUBLIC_API_TOKEN || 'LMyrBrMUP8zpYV5d';
 
 // Node.js Server-side In-Memory Cache
-import { serverArticleCache as serverArticleMemoryCache, SERVER_ARTICLE_CACHE_TTL_MS as CACHE_TTL_MS } from '../../../src/lib/serverArticleCache';
+import { serverArticleCache as serverArticleMemoryCache, SERVER_ARTICLE_CACHE_TTL_MS as CACHE_TTL_MS, markTakedown } from '../../../src/lib/serverArticleCache';
 
 function extractNumericId(idOrSlug: string): string {
   if (!idOrSlug) return '';
@@ -91,11 +91,20 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
 
       try {
         const res = await fetch(`https://api.sinpo.id/api/berita/${targetId}`, {
-          next: { revalidate: 60 },
+          next: { revalidate: 60, tags: [`article-${targetId}`] },
           headers,
           signal: controller.signal,
         });
         clearTimeout(timeoutId);
+
+        // CMS menghapus berita → 404/410 = takedown untuk request ini (hanya jika targetId angka murni)
+        if ((res.status === 404 || res.status === 410) && /^\d+$/.test(targetId)) {
+          serverArticleMemoryCache.delete(cacheKey);
+          if (cleanNumericId && cleanNumericId !== cacheKey) {
+            serverArticleMemoryCache.delete(cleanNumericId);
+          }
+          return { isTakedown: true };
+        }
 
         if (res.ok) {
           const json = await res.json();
@@ -140,7 +149,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
           (cleanNumericId && itNumId === cleanNumericId) ||
           itId === articleIdOrSlug ||
           itSlug === articleIdOrSlug ||
-          articleIdOrSlug.includes(itSlug)
+          (itSlug.length > 5 && articleIdOrSlug.includes(itSlug))
         );
       });
 
@@ -178,7 +187,7 @@ async function fetchArticleDetailFromApi(articleIdOrSlug: string) {
             (cleanNumericId && itNumId === cleanNumericId) ||
             itId === articleIdOrSlug ||
             itSlug === articleIdOrSlug ||
-            articleIdOrSlug.includes(itSlug)
+            (itSlug.length > 5 && articleIdOrSlug.includes(itSlug))
           );
         });
 

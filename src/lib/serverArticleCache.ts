@@ -42,3 +42,26 @@ export function invalidateServerArticle(articleIdOrSlug?: string | number | null
   }
   return removed;
 }
+
+const globalForTakedown = globalThis as unknown as {
+  __sinpoTakedownIds?: Set<number>;
+};
+const takedownIds: Set<number> =
+  globalForTakedown.__sinpoTakedownIds ?? (globalForTakedown.__sinpoTakedownIds = new Set());
+
+/** Tandai artikel sebagai takedown (dipanggil webhook / deteksi 404). */
+export function markTakedown(id: number | string) {
+  const n = parseInt(String(id).match(/\d+/)?.[0] || '0', 10);
+  if (n > 0) takedownIds.add(n);
+}
+
+/** Batalkan takedown (jika artikel dipublish ulang). */
+export function unmarkTakedown(id: number | string) {
+  const n = parseInt(String(id).match(/\d+/)?.[0] || '0', 10);
+  if (n > 0) takedownIds.delete(n);
+}
+
+export function isRuntimeTakedownId(id: number): boolean {
+  return takedownIds.has(id);
+}
+
