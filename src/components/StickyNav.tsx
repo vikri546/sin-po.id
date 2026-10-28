@@ -19,7 +19,7 @@ interface StickyNavProps {
 }
 
 const CATEGORIES = ["SEMUA", "POLITIK", "PERISTIWA", "HUKUM", "EKBIS", "BONGKAR", "SIN PO DULU"];
-const EXTRA_CATEGORIES = ["OLAHRAGA", "BUDAYA", "GALERI", "OPINI", "INDEKS"];
+const EXTRA_CATEGORIES = ["OLAHRAGA", "BUDAYA", "DUNIA", "GALERI", "OPINI", "INDEKS"];
 const ALL_CATEGORIES = [...CATEGORIES, ...EXTRA_CATEGORIES];
 
 const highlightText = (text: string, query: string) => {
