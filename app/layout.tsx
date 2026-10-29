@@ -146,6 +146,12 @@ export default function RootLayout({
         <link rel="shortcut icon" href="/sinpo-favicon.png" type="image/png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="apple-touch-icon" href="/sinpo-favicon.png" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&family=Inter:wght@300;400;500;600;700;800;900&family=Oswald:wght@400;500;600;700&display=swap"
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdWebsite) }}
@@ -159,7 +165,7 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdSitelinks) }}
         />
       </head>
-      <body className="antialiased selection:bg-red-600 selection:text-white">
+      <body className="font-sans antialiased selection:bg-red-600 selection:text-white">
         <Suspense fallback={null}>
           <GoogleAnalytics />
         </Suspense>

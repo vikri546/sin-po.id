@@ -46,9 +46,17 @@ function runRevalidation(articleId?: string | number | null, action: string = 'u
       if (rawStr !== cleanId) unmarkTakedown(rawStr);
     }
 
-    revalidateTag(`article-${cleanId}`);
+    try {
+      (revalidateTag as any)(`article-${cleanId}`, 'max');
+    } catch {
+      (revalidateTag as any)(`article-${cleanId}`);
+    }
     if (rawStr !== cleanId) {
-      revalidateTag(`article-${rawStr}`);
+      try {
+        (revalidateTag as any)(`article-${rawStr}`, 'max');
+      } catch {
+        (revalidateTag as any)(`article-${rawStr}`);
+      }
     }
   }
 

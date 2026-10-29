@@ -27,7 +27,7 @@ interface HeaderProps {
 }
 
 const CATEGORIES = ["SEMUA", "POLITIK", "PERISTIWA", "HUKUM", "EKBIS", "BONGKAR", "SIN PO DULU"];
-const EXTRA_CATEGORIES = ["OLAHRAGA", "BUDAYA", "GALERI", "OPINI", "INDEKS"];
+const EXTRA_CATEGORIES = ["OLAHRAGA", "BUDAYA", "DUNIA", "GALERI", "OPINI", "INDEKS"];
 
 export default function Header({ 
   bookmarkCount, 
