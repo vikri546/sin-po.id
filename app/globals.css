@@ -1,13 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Oswald:wght@400;500;600;700&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..900;1,6..96,400..900&display=swap');
 @import "tailwindcss";
 
 @variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-oswald: "Oswald", sans-serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-oswald: var(--font-oswald-google), sans-serif;
   --font-serif: "Times New Roman", Times, Georgia, serif;
-  --font-logo: "Bodoni Moda", "Times New Roman", Times, Georgia, serif;
+  --font-logo: var(--font-bodoni-google), "Times New Roman", Times, Georgia, serif;
   
   --color-brand-red-50: #FEF2F2;
   --color-brand-red-100: #FEE2E2;
